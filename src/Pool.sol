@@ -73,7 +73,7 @@ contract Pool is Ownable, IPool, IzitRBTree {
 
     function cancelOrder(OrderId orderId) 
         public
-
+        returns (bool cancelSuccess)
     {
         bool isSellOrder;
         Position memory pos;
@@ -123,6 +123,7 @@ contract Pool is Ownable, IPool, IzitRBTree {
 
         require(pOrder.margin*6 >= pOrder.size * pOrder.priceX100 , "Leverage Overflow");
 
+        // Transfer margin from Vault contract to pool
         IVault(vault).internalTransfer(caller, address(this), pOrder.margin);
         newPosId = IPosition(positionNFT).newNFT(pOrder, caller);
 

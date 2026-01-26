@@ -5,7 +5,7 @@ import {Ownable} from "./libraries/Ownable.sol";
 import {Pool} from "./Pool.sol";
 import {Vault} from "./Vault.sol";
 import {positionNFT} from "./PositionNFT.sol";
-import {CS2IndexOracle} from "./CS2IndexOracle.sol";
+import {IndexOracle} from "./IndexOracle.sol";
 import {LiquidationEngine} from "./LiquidationEngine.sol";
 import {ADLEngine} from "./ADLEngine.sol";
 

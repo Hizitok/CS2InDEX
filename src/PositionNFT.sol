@@ -18,7 +18,7 @@ contract positionNFT is OrderTypes, PosERC721 {
     mapping(uint256 => Position) private _positions;
 
     // Authorized pools (can mint and update positions)
-    mapping(address => bool) private _availablePools;
+    mapping(address => bool) private _authorizedPools;
 
     // Position settled status (prevents double settlement)
     mapping(uint256 => bool) private _settled;
@@ -44,7 +44,7 @@ contract positionNFT is OrderTypes, PosERC721 {
     );
 
     modifier onlyPool() {
-        require(_availablePools[msg.sender], "Only authorized pool");
+        require(_authorizedPools[msg.sender], "Only authorized pool");
         _;
     }
 
@@ -59,7 +59,7 @@ contract positionNFT is OrderTypes, PosERC721 {
      */
     function setPool(address pool, bool allowed) external onlyOwner {
         require(pool != address(0), "Invalid pool address");
-        _availablePools[pool] = allowed;
+        _authorizedPools[pool] = allowed;
     }
 
     // ======== Position NFT Functions ========
@@ -185,7 +185,7 @@ contract positionNFT is OrderTypes, PosERC721 {
      * @return Whether pool is authorized
      */
     function isPoolAuthorized(address pool) external view returns (bool) {
-        return _availablePools[pool];
+        return _authorizedPools[pool];
     }
 
 

@@ -19,13 +19,11 @@ contract Vault is Ownable, ReentrancyGuard {
     uint256 public totalAmount;
 
     // User balances: user => balance
+    // Locked balances is Stored in pool account
     mapping(address => uint256) public balances;
 
     // Available pools (authorized to call internalTransfer)
     mapping(address => bool) public availablePools;
-
-    // Locked balances for positions: user => locked amount
-    mapping(address => uint256) public lockedBalances;
 
     // Events
     event PoolUpdated(address indexed pool, bool allowed);
@@ -49,25 +47,13 @@ contract Vault is Ownable, ReentrancyGuard {
         uint256 amount
     );
 
-    event BalanceLocked(
-        address indexed user,
-        uint256 amount,
-        uint256 totalLocked
-    );
-
-    event BalanceUnlocked(
-        address indexed user,
-        uint256 amount,
-        uint256 totalLocked
-    );
-
     // Modifiers
     modifier onlyPool() {
         require(availablePools[msg.sender], "Only authorized pool");
         _;
     }
 
-    constructor(address _supportedToken) Ownable() {
+    constructor(address _supportedToken) Ownable(msg.sender) {
         require(_supportedToken != address(0), "Invalid token address");
         supportedToken = _supportedToken;
     }
@@ -94,17 +80,6 @@ contract Vault is Ownable, ReentrancyGuard {
      */
     function balanceOf(address user) external view returns (uint256) {
         return balances[user];
-    }
-
-    /**
-     * @notice Query user's available balance (not locked in positions)
-     * @param user User address
-     * @return Available balance for withdrawal
-     */
-    function availableBalance(address user) external view returns (uint256) {
-        uint256 total = balances[user];
-        uint256 locked = lockedBalances[user];
-        return total > locked ? total - locked : 0;
     }
 
     /**
@@ -147,10 +122,8 @@ contract Vault is Ownable, ReentrancyGuard {
         require(amount > 0, "Zero amount");
 
         uint256 userBalance = balances[msg.sender];
-        uint256 userLocked = lockedBalances[msg.sender];
-        uint256 available = userBalance > userLocked ? userBalance - userLocked : 0;
 
-        require(available >= amount, "Insufficient available balance");
+        require(userBalance >= amount, "Insufficient available balance");
 
         // Update balances
         totalAmount -= amount;
@@ -212,97 +185,7 @@ contract Vault is Ownable, ReentrancyGuard {
         emit InternalTransfer(msg.sender, from, to, amount);
     }
 
-    /**
-     * @notice Lock user balance for position margin
-     * @dev Called by pool when opening a position
-     * @param user User address
-     * @param amount Amount to lock
-     */
-    function lockBalance(address user, uint256 amount) external onlyPool {
-        require(amount > 0, "Zero amount");
-
-        uint256 userBalance = balances[user];
-        uint256 userLocked = lockedBalances[user];
-        uint256 available = userBalance > userLocked ? userBalance - userLocked : 0;
-
-        require(available >= amount, "Insufficient available balance");
-
-        lockedBalances[user] = userLocked + amount;
-
-        emit BalanceLocked(user, amount, lockedBalances[user]);
-    }
-
-    /**
-     * @notice Unlock user balance after position closed
-     * @dev Called by pool when closing/liquidating a position
-     * @param user User address
-     * @param amount Amount to unlock
-     */
-    function unlockBalance(address user, uint256 amount) external onlyPool {
-        require(amount > 0, "Zero amount");
-
-        uint256 userLocked = lockedBalances[user];
-        require(userLocked >= amount, "Insufficient locked balance");
-
-        lockedBalances[user] = userLocked - amount;
-
-        emit BalanceUnlocked(user, amount, lockedBalances[user]);
-    }
-
-    /**
-     * @notice Transfer and lock in one operation
-     * @dev Optimized for opening positions
-     * @param from User address
-     * @param to Pool/contract address
-     * @param amount Amount to transfer and lock
-     */
-    function transferAndLock(
-        address from,
-        address to,
-        uint256 amount
-    ) external onlyPool nonReentrant {
-        require(amount > 0, "Zero amount");
-        require(from != address(0) && to != address(0), "Invalid address");
-
-        uint256 fromBalance = balances[from];
-        uint256 fromLocked = lockedBalances[from];
-        uint256 available = fromBalance > fromLocked ? fromBalance - fromLocked : 0;
-
-        require(available >= amount, "Insufficient available balance");
-
-        // Update balances
-        balances[from] = fromBalance - amount;
-        balances[to] += amount;
-
-        // Lock the transferred amount for 'from' user
-        lockedBalances[from] = fromLocked + amount;
-
-        emit InternalTransfer(msg.sender, from, to, amount);
-        emit BalanceLocked(from, amount, lockedBalances[from]);
-    }
-
     // ======== View helpers ========
-
-    /**
-     * @notice Get comprehensive user balance info
-     * @param user User address
-     * @return total Total balance
-     * @return locked Locked balance
-     * @return available Available for withdrawal
-     */
-    function getUserBalanceInfo(address user)
-        external
-        view
-        returns (
-            uint256 total,
-            uint256 locked,
-            uint256 available
-        )
-    {
-        total = balances[user];
-        locked = lockedBalances[user];
-        available = total > locked ? total - locked : 0;
-    }
 
     /**
      * @notice Check if pool is authorized
