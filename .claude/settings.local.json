@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(forge build:*)",
+      "Bash(forge test:*)",
+      "Bash(wsl -e sh:*)",
+      "Bash(wsl echo $PATH)",
+      "Bash(wsl ls:*)"
+    ]
+  }
+}
