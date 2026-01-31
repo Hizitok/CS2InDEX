@@ -15,15 +15,14 @@ pragma solidity ^0.8.20;
  * - Batch liquidate first N positions
  * - Estimate liquidation pressure at price levels
  */
-library IzitOrderStatisticsTree {
+abstract contract IzitOrderStatisticsTree {
 
     uint256 private constant NIL = 0;
     bool private constant RED = true;
     bool private constant BLACK = false;
 
     struct Node {
-        uint256 key;           // Liquidation price (or any sortable key)
-        uint256 value;         // Position ID (OrderId)
+        uint256 key;           // Key pointer: Position ID (OrderId)
         uint256 parent;
         uint256 left;
         uint256 right;
@@ -39,20 +38,24 @@ library IzitOrderStatisticsTree {
     }
 
     // Events for debugging
-    event NodeInserted(uint256 key, uint256 value, uint256 nodeId);
+    event NodeInserted(uint256 key, uint256 nodeId);
     event NodeRemoved(uint256 key, uint256 nodeId);
 
     /*//////////////////////////////////////////////////////////////
                             CORE OPERATIONS
     //////////////////////////////////////////////////////////////*/
 
+    function _less(uint256 ptr_a, uint256 ptr_b)
+        internal
+        virtual
+    returns (bool);
+
     /**
      * @notice Insert a new key-value pair
      * @param tree The tree storage
-     * @param key The key to insert (e.g., liquidation price)
-     * @param value The value to store (e.g., position ID)
+     * @param key The key to insert (e.g., position ID)
      */
-    function insert(Tree storage tree, uint256 key, uint256 value) internal {
+    function insert(Tree storage tree, uint256 key) internal {
         require(key != 0, "Key cannot be 0");
         require(!contains(tree, key), "Key already exists");
 
@@ -67,7 +70,7 @@ library IzitOrderStatisticsTree {
             parent = current;
             tree.nodes[current].size++;  // Update size along the path
 
-            if (key < tree.nodes[current].key) {
+            if ( _less(key,tree.nodes[current].key) ) {
                 current = tree.nodes[current].left;
             } else {
                 current = tree.nodes[current].right;
@@ -77,7 +80,6 @@ library IzitOrderStatisticsTree {
         // Create new node
         tree.nodes[nodeId] = Node({
             key: key,
-            value: value,
             parent: parent,
             left: NIL,
             right: NIL,
@@ -87,7 +89,7 @@ library IzitOrderStatisticsTree {
 
         if (parent == NIL) {
             tree.root = nodeId;
-        } else if (key < tree.nodes[parent].key) {
+        } else if (_less(key,tree.nodes[parent].key)) {
             tree.nodes[parent].left = nodeId;
         } else {
             tree.nodes[parent].right = nodeId;
@@ -96,7 +98,7 @@ library IzitOrderStatisticsTree {
         // Fix Red-Black properties
         insertFixup(tree, nodeId);
 
-        emit NodeInserted(key, value, nodeId);
+        emit NodeInserted(key, nodeId);
     }
 
     /**
@@ -189,18 +191,16 @@ library IzitOrderStatisticsTree {
      * @param tree The tree storage
      * @param k The rank to find (1 = smallest)
      * @return key The k-th smallest key
-     * @return value The corresponding value
      */
     function getKthSmallest(Tree storage tree, uint256 k)
         internal
         view
-        returns (uint256 key, uint256 value)
+        returns (uint256 key)
     {
         require(k > 0 && k <= getSize(tree, tree.root), "k out of range");
 
         uint256 nodeId = selectNode(tree, tree.root, k);
         key = tree.nodes[nodeId].key;
-        value = tree.nodes[nodeId].value;
     }
 
     /**
@@ -217,29 +217,29 @@ library IzitOrderStatisticsTree {
         return countLessThanRecursive(tree, tree.root, threshold);
     }
 
-    /**
-     * @notice Get all keys less than threshold (for batch liquidation)
-     * @param tree The tree storage
-     * @param threshold The threshold value
-     * @param maxResults Maximum number of results to return
-     * @return keys Array of keys less than threshold
-     * @return values Array of corresponding values
-     */
-    function getKeysLessThan(Tree storage tree, uint256 threshold, uint256 maxResults)
-        internal
-        view
-        returns (uint256[] memory keys, uint256[] memory values)
-    {
-        uint256 count = countLessThan(tree, threshold);
-        if (count > maxResults) count = maxResults;
+    // /**
+    //  * @notice Get all keys less than threshold (for batch liquidation)
+    //  * @param tree The tree storage
+    //  * @param threshold The threshold value
+    //  * @param maxResults Maximum number of results to return
+    //  * @return keys Array of keys less than threshold
+    //  * @return values Array of corresponding values
+    //  */
+    // function getKeysLessThan(Tree storage tree, uint256 threshold, uint256 maxResults)
+    //     internal
+    //     view
+    //     returns (uint256[] memory keys, uint256[] memory values)
+    // {
+    //     uint256 count = countLessThan(tree, threshold);
+    //     if (count > maxResults) count = maxResults;
 
-        keys = new uint256[](count);
-        values = new uint256[](count);
+    //     keys = new uint256[](count);
+    //     values = new uint256[](count);
 
-        if (count > 0) {
-            collectKeysLessThan(tree, tree.root, threshold, keys, values, 0, maxResults);
-        }
-    }
+    //     if (count > 0) {
+    //         collectKeysLessThan(tree, tree.root, threshold, keys, values, 0, maxResults);
+    //     }
+    // }
 
     /*//////////////////////////////////////////////////////////////
                             BASIC QUERIES
@@ -253,31 +253,21 @@ library IzitOrderStatisticsTree {
     }
 
     /**
-     * @notice Get value for a key
-     */
-    function getValue(Tree storage tree, uint256 key) internal view returns (uint256) {
-        require(contains(tree, key), "Key not found");
-        return tree.nodes[tree.keyToNodeId[key]].value;
-    }
-
-    /**
      * @notice Get minimum key in tree
      */
-    function getMin(Tree storage tree) internal view returns (uint256 key, uint256 value) {
+    function getMin(Tree storage tree) internal view returns (uint256 key) {
         require(tree.root != NIL, "Tree is empty");
         uint256 nodeId = minimum(tree, tree.root);
         key = tree.nodes[nodeId].key;
-        value = tree.nodes[nodeId].value;
     }
 
     /**
      * @notice Get maximum key in tree
      */
-    function getMax(Tree storage tree) internal view returns (uint256 key, uint256 value) {
+    function getMax(Tree storage tree) internal view returns (uint256 key) {
         require(tree.root != NIL, "Tree is empty");
         uint256 nodeId = maximum(tree, tree.root);
         key = tree.nodes[nodeId].key;
-        value = tree.nodes[nodeId].value;
     }
 
     /**
@@ -358,38 +348,38 @@ library IzitOrderStatisticsTree {
         }
     }
 
-    function collectKeysLessThan(
-        Tree storage tree,
-        uint256 nodeId,
-        uint256 threshold,
-        uint256[] memory keys,
-        uint256[] memory values,
-        uint256 index,
-        uint256 maxResults
-    ) private view returns (uint256) {
-        if (nodeId == NIL || index >= maxResults) return index;
+    // function collectKeysLessThan(
+    //     Tree storage tree,
+    //     uint256 nodeId,
+    //     uint256 threshold,
+    //     uint256[] memory keys,
+    //     uint256[] memory values,
+    //     uint256 index,
+    //     uint256 maxResults
+    // ) private view returns (uint256) {
+    //     if (nodeId == NIL || index >= maxResults) return index;
 
-        // In-order traversal to collect keys in sorted order
-        if (tree.nodes[nodeId].key < threshold) {
-            // Collect left subtree
-            index = collectKeysLessThan(tree, tree.nodes[nodeId].left, threshold, keys, values, index, maxResults);
+    //     // In-order traversal to collect keys in sorted order
+    //     if (tree.nodes[nodeId].key < threshold) {
+    //         // Collect left subtree
+    //         index = collectKeysLessThan(tree, tree.nodes[nodeId].left, threshold, keys, values, index, maxResults);
 
-            // Collect current node
-            if (index < maxResults) {
-                keys[index] = tree.nodes[nodeId].key;
-                values[index] = tree.nodes[nodeId].value;
-                index++;
-            }
+    //         // Collect current node
+    //         if (index < maxResults) {
+    //             keys[index] = tree.nodes[nodeId].key;
+    //             values[index] = tree.nodes[nodeId].value;
+    //             index++;
+    //         }
 
-            // Collect right subtree
-            index = collectKeysLessThan(tree, tree.nodes[nodeId].right, threshold, keys, values, index, maxResults);
-        } else {
-            // Only check left subtree
-            index = collectKeysLessThan(tree, tree.nodes[nodeId].left, threshold, keys, values, index, maxResults);
-        }
+    //         // Collect right subtree
+    //         index = collectKeysLessThan(tree, tree.nodes[nodeId].right, threshold, keys, values, index, maxResults);
+    //     } else {
+    //         // Only check left subtree
+    //         index = collectKeysLessThan(tree, tree.nodes[nodeId].left, threshold, keys, values, index, maxResults);
+    //     }
 
-        return index;
-    }
+    //     return index;
+    // }
 
     /*//////////////////////////////////////////////////////////////
                         RED-BLACK TREE MAINTENANCE

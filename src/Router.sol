@@ -30,7 +30,7 @@ contract Router is IRouter, ReentrancyGuard {
     }
 
     /**
-     * @notice Deposit USDC to vault and open position in one tx
+     * @notice Deposit Token to vault and open position in one tx
      */
     function depositAndOpenPosition(
         address pool,
@@ -40,10 +40,10 @@ contract Router is IRouter, ReentrancyGuard {
         require(isValidPool(pool), "Invalid pool");
         require(depositAmount > 0, "Invalid deposit amount");
 
-        // Transfer USDC from user to this contract
+        // Transfer Token from user to this contract
         currency.transferFrom(msg.sender, address(this), depositAmount);
 
-        // Approve vault to spend USDC
+        // Approve vault to spend Token
         currency.approve(address(vault), depositAmount);
 
         // Deposit to vault

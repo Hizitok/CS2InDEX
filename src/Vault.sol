@@ -25,6 +25,12 @@ contract Vault is Ownable, ReentrancyGuard {
     // Available pools (authorized to call internalTransfer)
     mapping(address => bool) public availablePools;
 
+    // Errors 
+    error InvalidAddress(address);
+    error InvalidAmount();
+    error TransferFailed();
+    error ZeroAmount();
+
     // Events
     event PoolUpdated(address indexed pool, bool allowed);
 
@@ -36,7 +42,7 @@ contract Vault is Ownable, ReentrancyGuard {
 
     event Withdrawn(
         address indexed user,
-        address indexed token,
+        address indexed to,
         uint256 amount
     );
 
@@ -54,7 +60,8 @@ contract Vault is Ownable, ReentrancyGuard {
     }
 
     constructor(address _supportedToken) Ownable(msg.sender) {
-        require(_supportedToken != address(0), "Invalid token address");
+        if (_supportedToken == address(0)) 
+            revert InvalidAddress(_supportedToken);
         supportedToken = _supportedToken;
     }
 
@@ -66,7 +73,7 @@ contract Vault is Ownable, ReentrancyGuard {
      * @param allowed Whether pool is authorized
      */
     function setPool(address pool, bool allowed) external onlyOwner {
-        require(pool != address(0), "Invalid pool address");
+        if (pool == address(0)) revert InvalidAddress(pool);
         availablePools[pool] = allowed;
         emit PoolUpdated(pool, allowed);
     }
@@ -96,7 +103,7 @@ contract Vault is Ownable, ReentrancyGuard {
      * @param amount Amount to deposit
      */
     function deposit(uint256 amount) external nonReentrant {
-        require(amount > 0, "Zero amount");
+        if (amount == 0) revert ZeroAmount();
 
         // Transfer tokens from user
         bool success = IERC20(supportedToken).transferFrom(
@@ -104,7 +111,7 @@ contract Vault is Ownable, ReentrancyGuard {
             address(this),
             amount
         );
-        require(success, "Transfer from failed");
+        if(!success) revert TransferFailed();
 
         // Update balances
         totalAmount += amount;
@@ -113,27 +120,41 @@ contract Vault is Ownable, ReentrancyGuard {
         emit Deposited(msg.sender, supportedToken, amount);
     }
 
+    function internalWithdraw(address from, uint256 amount, uint256 to) 
+        private 
+    {
+        if (amount == 0) revert ZeroAmount();
+
+        // Check from account balances
+        uint256 userBalance = balances[from];
+        if(userBalance < amount) revert InvalidAmount();
+
+        // Update balances
+        totalAmount -= amount;
+        balances[from] = userBalance - amount;
+
+        // Transfer tokens to user
+        bool success = IERC20(supportedToken).transfer(to, amount);
+        if(!success) revert TransferFailed();
+
+        emit Withdrawn(from, to, amount);
+    }
+
     /**
      * @notice User withdraws collateral
      * @dev Can only withdraw unlocked balance
      * @param amount Amount to withdraw
      */
     function withdraw(uint256 amount) external nonReentrant {
-        require(amount > 0, "Zero amount");
+        internalWithdraw(msg.sender, amount, msg.sender);
 
-        uint256 userBalance = balances[msg.sender];
+    }
 
-        require(userBalance >= amount, "Insufficient available balance");
-
-        // Update balances
-        totalAmount -= amount;
-        balances[msg.sender] = userBalance - amount;
-
-        // Transfer tokens to user
-        bool success = IERC20(supportedToken).transfer(msg.sender, amount);
-        require(success, "Transfer failed");
-
-        emit Withdrawn(msg.sender, supportedToken, amount);
+    function withdrawTo(uint256 amount, address to)
+        external
+        nonReentrant 
+    {
+        internalWithdraw(msg.sender, amount, to);
     }
 
     /**
@@ -147,13 +168,13 @@ contract Vault is Ownable, ReentrancyGuard {
         onlyOwner
     {
         require(token != supportedToken, "Cannot withdraw supported token");
-        require(amount > 0, "Zero amount");
+        if (amount == 0) revert ZeroAmount();
 
         uint256 balance = IERC20(token).balanceOf(address(this));
-        require(balance >= amount, "Insufficient balance");
+        if(balance < amount) revert InvalidAmount();
 
         bool success = IERC20(token).transfer(msg.sender, amount);
-        require(success, "Transfer failed");
+        if(!success) revert TransferFailed();
 
         emit Withdrawn(msg.sender, token, amount);
     }
@@ -172,11 +193,12 @@ contract Vault is Ownable, ReentrancyGuard {
         address to,
         uint256 amount
     ) external onlyPool nonReentrant {
-        require(amount > 0, "Zero amount");
+        if (amount == 0) revert ZeroAmount();
+
         require(from != address(0) && to != address(0), "Invalid address");
 
         uint256 fromBalance = balances[from];
-        require(fromBalance >= amount, "Insufficient balance");
+        if(fromBalance < amount) revert InvalidAmount();
 
         // Update balances
         balances[from] = fromBalance - amount;

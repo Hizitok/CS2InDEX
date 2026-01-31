@@ -11,13 +11,19 @@ interface IFactory {
      * @notice Pool information struct
      */
     struct PoolInfo {
+        string itemName;
         address poolAddress;
         address oracle;
         address positionNFT;
-        string itemName;
         uint256 createdAt;
         bool isActive;
     }
+
+    /*
+     * Most contracts are created when Factory is created
+     * Only Pools need to create manully
+
+    */
 
     /**
      * @notice Create a new trading pool for a CS2 index

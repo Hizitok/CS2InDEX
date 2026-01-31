@@ -11,6 +11,13 @@ import {OrderTypes} from "./OrderTypes.sol";
 interface IPool is OrderTypes {
     // Errors
     error FOK();
+    error PxOverflow();
+    error PxUnderflow();
+    error LeverageOverflow();
+    error CancelFailed();
+    error InvalidMatch();
+    error InvaildStatus();
+    error NotAuthorized();
 
     // Events
     event IOC();
@@ -64,27 +71,55 @@ interface IPool is OrderTypes {
     function collectFees(address to) external;
 
     /**
+     * @notice Get total fees collected
+     * @return Total fees
+     */
+    function feeCollected() external view returns (uint256);
+
+    /**
      * @notice Get comprehensive pool information
      * @return _lastPriceX100 Last traded price
-     * @return _oraclePriceX100 Current oracle price
-     * @return _totalVolume Total trading volume
-     * @return _feeCollected Total fees collected
+     * @return _ask1Price Total trading volume
+     * @return _bid1Price Total fees collected
      */
-    function getPoolInfo()
+    function getOrderbookInfo()
         external
         view
         returns (
             uint256 _lastPriceX100,
-            uint256 _oraclePriceX100,
-            uint256 _totalVolume,
-            uint256 _feeCollected
+            uint256 _ask1Price,
+            uint256 _bid1Price
         );
+
+    /**
+     * @notice Get maximum leverage allowed
+     * @return Max leverage (600 = 6x)
+     */
+    function MAX_LEVERAGE() external view returns (uint256);
+
+    /**
+     * @notice Get oracle contract address
+     * @return Oracle address
+     */
+    function oracle() external view returns (address);
+
+    /**
+     * @notice Get current oracle price
+     * @return Oracle price multiplied by 100
+     */
+    function oraclePrice() external view returns (uint256);
 
     /**
      * @notice Get position NFT contract address
      * @return Position NFT address
      */
     function positionNFT() external view returns (address);
+
+    /**
+     * @notice Get total trading volume
+     * @return Total volume
+     */
+    function totalVolume() external view returns (uint256);
 
     /**
      * @notice Get vault contract address
@@ -98,51 +133,4 @@ interface IPool is OrderTypes {
      */
     function getLastPrice() external view returns (uint256);
 
-    /**
-     * @notice Get oracle contract address
-     * @return Oracle address
-     */
-    function oracle() external view returns (address);
-
-    /**
-     * @notice Get currency token address (USDC)
-     * @return Currency token address
-     */
-    function currency() external view returns (address);
-
-    /**
-     * @notice Get current oracle price
-     * @return Oracle price multiplied by 100
-     */
-    function oraclePriceX100() external view returns (uint256);
-
-    /**
-     * @notice Get total trading volume
-     * @return Total volume
-     */
-    function totalVolume() external view returns (uint256);
-
-    /**
-     * @notice Get total fees collected
-     * @return Total fees
-     */
-    function feeCollected() external view returns (uint256);
-
-    /**
-     * @notice Get maker fee rate (basis points)
-     * @return Maker fee (30 = 0.3%)
-     */
-    function MAKER_FEE() external view returns (uint256);
-
-    /**
-     * @notice Get taker fee rate (basis points)
-     * @return Taker fee (50 = 0.5%)
-     */
-    function TAKER_FEE() external view returns (uint256);
-
-    /**
-     * @notice Get maximum leverage allowed
-     * @return Max leverage (600 = 6x)
-     */
-    function MAX_LEVERAGE() external view returns (uint256);
 }

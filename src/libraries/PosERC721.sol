@@ -146,14 +146,21 @@ contract PosERC721 is Ownable, IERC721 {
             revert InvalidSender(from);
         }
 
-        bool authorized = (
-            msg.sender == owner ||
-            msg.sender == _tokenApprovals[tokenId] ||
-            _operatorApprovals[owner][msg.sender]
-        );
-        require(authorized, "Not authorized");
+        require(_authorized(tokenId, msg.sender), "Not authorized");
 
         _transfer(from, to, tokenId);
+    }
+
+    function _authorized(uint256 tokenId, address user)
+        public 
+        view
+        returns (bool authorized)
+    {
+        authorized = (
+            user == _owners[tokenId] ||
+            user == _tokenApprovals[tokenId] ||
+            _operatorApprovals[_owners[tokenId]][user]
+        );
     }
 
     /// @inheritdoc IERC721

@@ -42,7 +42,7 @@ abstract contract IzitRBTree {
     returns (bool);
 
     function _isNil(Node_ptr p) internal pure returns (bool) {
-        return p == NIL;
+        return Node_ptr.unwrap(p) == Node_ptr.unwrap(NIL);
     }
 
     function query_min(Tree storage _tree, Node_ptr _sub_root)

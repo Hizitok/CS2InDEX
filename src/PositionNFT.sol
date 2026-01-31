@@ -23,19 +23,19 @@ contract positionNFT is OrderTypes, PosERC721 {
     // Position settled status (prevents double settlement)
     mapping(uint256 => bool) private _settled;
 
+    mapping(uint256 => address) _owners;
+    mapping(address => uint256) _balances;
+
     // Events
     event PositionCreated(
         uint256 indexed tokenId,
         address indexed owner,
-        address indexed pool,
-        bool isShort
+        Position pos
     );
 
     event PositionUpdated(
         uint256 indexed tokenId,
-        posStatus status,
-        uint256 openSize,
-        uint256 closeSize
+        Position pos
     );
 
     event PositionSettled(
@@ -48,7 +48,7 @@ contract positionNFT is OrderTypes, PosERC721 {
         _;
     }
 
-    constructor() Ownable() {}
+    constructor() {}
 
     // ======== Admin Functions ========
 
@@ -70,7 +70,7 @@ contract positionNFT is OrderTypes, PosERC721 {
      * @param owner NFT owner
      * @return oID New position ID
      */
-    function newNFT(PoolOrder calldata pOrder, address owner)
+    function newNFT(PoolOrder calldata pOrder, address owner, uint256 margin)
         external
         onlyPool
         returns (OrderId oID)
@@ -81,23 +81,26 @@ contract positionNFT is OrderTypes, PosERC721 {
         oID = OrderId.wrap(tokenCount);
 
         Position memory newPos = Position({
-            pool: msg.sender,
             positionID: tokenCount,
-            status: posStatus.pendingOpen,
+            pool: msg.sender,
+
             isShort: pOrder.isSell,
-            openMargin: pOrder.margin,
+            status: posStatus.pendingOpen,
+            openMargin: margin,
             pendingSize: pOrder.size,
             openSize: 0,
             closeSize: 0,
             openAmount: 0,
-            closeAmount: 0
+            closeAmount: 0,
+            openFundingIdx: 0,
+            closeFundingIdx: 0
         });
 
         _positions[tokenCount] = newPos;
         _owners[tokenCount] = owner;
         _balances[owner] += 1;
 
-        emit PositionCreated(tokenCount, owner, msg.sender, pOrder.isSell);
+        emit PositionCreated(tokenCount, owner, newPos);
     }
 
     /**
@@ -130,7 +133,7 @@ contract positionNFT is OrderTypes, PosERC721 {
 
         _positions[id] = pos;
 
-        emit PositionUpdated(id, pos.status, pos.openSize, pos.closeSize);
+        emit PositionUpdated(id, pos);
     }
 
     /**
@@ -167,6 +170,17 @@ contract positionNFT is OrderTypes, PosERC721 {
         _settled[id] = true;
 
         emit PositionSettled(id, _owners[id]);
+    }
+
+    /**
+     * @notice Check if position is authorized
+     * @param oID Position ID
+     * @param user User Address
+     * @return Whether user is authorized
+     */
+    function isAuthorized(OrderId oID, address user) external view returns (bool) {
+        uint256 id = OrderId.unwrap(oID);
+        return (_positions[id].pool == user) || _authorized(id, user);
     }
 
     /**

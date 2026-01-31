@@ -11,7 +11,7 @@ interface IPosition is OrderTypes {
      * @param owner The owner of the position
      * @return posId The new position ID
      */
-    function newNFT(PoolOrder calldata pOrder, address owner) external returns (OrderId posId);
+    function newNFT(PoolOrder calldata pOrder, address owner, uint256 margin) external returns (OrderId posId);
 
     /**
      * @notice Get position details
@@ -24,8 +24,9 @@ interface IPosition is OrderTypes {
      * @notice Update position data
      * @param posId Position ID
      * @param pos Updated position data
+     * @return success if Update is success
      */
-    function updatePosition(OrderId posId, Position memory pos) external;
+    function updatePosition(OrderId posId, Position memory pos) external returns (bool);
 
     /**
      * @notice Get the opening tick/price of a position
@@ -73,6 +74,15 @@ interface IPosition is OrderTypes {
      * @return Token URI
      */
     function tokenURI(uint256 tokenId) external view returns (string memory);
+
+    /**
+     * @notice Check if a user is authorized
+     * @param oID Position ID
+     * @param user User address
+     * @return True if authorized
+     */
+    function isAuthorized(OrderId oID, address user) external view returns (bool);
+
 
     /**
      * @notice Check if pool is authorized
