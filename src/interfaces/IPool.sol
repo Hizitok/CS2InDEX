@@ -16,7 +16,8 @@ interface IPool is OrderTypes {
     error LeverageOverflow();
     error CancelFailed();
     error InvalidMatch();
-    error InvaildStatus();
+    error InvalidOracle();
+    error InvalidStatus();
     error NotAuthorized();
 
     // Events
@@ -33,16 +34,17 @@ interface IPool is OrderTypes {
 
     /**
      * @notice Create a new order
+     * @param margin margin amount
      * @param pOrder Order details
      * @return newPosId The created order/position ID
      */
-    function newOrder(PoolOrder memory pOrder) external returns (OrderId newPosId);
+    function newOrder(uint256 margin, PoolOrder memory pOrder) external returns (OrderId newPosId);
 
     /**
      * @notice Cancel an open order
      * @param orderId Order ID to cancel
      */
-    function cancelOrder(OrderId orderId) external;
+    function cancelOrder(OrderId orderId) external returns (bool);
 
     /**
      * @notice Close an existing position
@@ -59,22 +61,10 @@ interface IPool is OrderTypes {
     function settlePnL(OrderId orderId) external;
 
     /**
-     * @notice Update oracle price (owner only)
-     * @param newPrice New price multiplied by 100
-     */
-    function updateOraclePrice(uint256 newPrice) external;
-
-    /**
      * @notice Collect accumulated fees (owner only)
      * @param to Recipient address
      */
     function collectFees(address to) external;
-
-    /**
-     * @notice Get total fees collected
-     * @return Total fees
-     */
-    function feeCollected() external view returns (uint256);
 
     /**
      * @notice Get comprehensive pool information
@@ -95,7 +85,7 @@ interface IPool is OrderTypes {
      * @notice Get maximum leverage allowed
      * @return Max leverage (600 = 6x)
      */
-    function MAX_LEVERAGE() external view returns (uint256);
+    function maxLeverage() external view returns (uint256);
 
     /**
      * @notice Get oracle contract address
@@ -110,16 +100,28 @@ interface IPool is OrderTypes {
     function oraclePrice() external view returns (uint256);
 
     /**
+     * @notice Update oracle price (owner only)
+     * @param newPrice New price multiplied by 100
+     */
+    function updateOraclePrice(uint256 newPrice) external;
+
+    /**
+     * @notice Get current funding index
+     * @return Current funding index
+     */
+    function fundingIdx() external view returns (uint256);
+
+    /**
+     * @notice Update new Funding Index
+     * @param newFundingIdx New Funding Index
+     */
+    function updateFundingIndex(uint256 newFundingIdx) external;
+
+    /**
      * @notice Get position NFT contract address
      * @return Position NFT address
      */
     function positionNFT() external view returns (address);
-
-    /**
-     * @notice Get total trading volume
-     * @return Total volume
-     */
-    function totalVolume() external view returns (uint256);
 
     /**
      * @notice Get vault contract address

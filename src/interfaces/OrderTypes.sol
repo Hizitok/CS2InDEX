@@ -37,8 +37,8 @@ interface OrderTypes {
         uint256 closeAmount;
 
         // Cumulative Funding index 
-        uint128 openFundingIdx;
-        uint128 closeFundingIdx;
+        uint256 openFundingIdx;
+        uint256 closeFundingIdx;
     }
 
 }

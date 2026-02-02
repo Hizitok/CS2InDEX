@@ -9,9 +9,9 @@ import {IzitOSTreeMinimum} from "./libraries/IzitOSTreeMinimum.sol";
 
 contract Pool is Ownable, IPool, IzitOSTreeMinimum {
 
-    uint256 MAKERFEE = 3000;
-    uint256 TAKERFEE = 5000;
-    uint256 FEEBASIS = 1000000;
+    uint256 public constant MAKERFEE = 3000;
+    uint256 public constant TAKERFEE = 5000;
+    uint256 public constant FEEBASIS = 1000000;
 
     string public description;
 
@@ -20,19 +20,20 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     address public positionNFT;
     address public vault;
 
-    uint128 public fundingIdx = 1 << 126;
+    uint256 public fundingIdx = 1 << 126;
     uint256 public lastPrice;
-    uint256 public MAX_LEVERAGE = 600;
+    uint256 public oraclePrice;
+    uint256 public maxLeverage = 600;
 
     // orderId => PriceX100, Size
-    mapping(OrderId => uint256) OBPx;
-    mapping(OrderId => uint256) OBSize;
+    mapping(OrderId => uint256) internal OBPx;
+    mapping(OrderId => uint256) internal OBSize;
 
-    uint256 curDecimalConvert;
-    uint256 feeCollected;
+    uint256 internal curDecimalConvert;
+    uint256 private feeCollected;
 
-    Tree _ask_OB; // Sell orders
-    Tree _bid_OB; // Buy orders
+    Tree internal _ask_OB; // Sell orders
+    Tree internal _bid_OB; // Buy orders
 
     constructor(
         address _vault,
@@ -40,7 +41,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         address _oracle,
         uint256 _curDecimal,
         uint256 _initialPrice,
-        string _description
+        string memory _description
     ) Ownable(msg.sender) {
         factory = msg.sender;
         vault = _vault;
@@ -49,6 +50,11 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         curDecimalConvert = _curDecimal;
         lastPrice = _initialPrice;
         description = _description;
+    }
+
+    modifier onlyOracle() {
+        if( msg.sender != oracle ) revert InvalidOracle();
+        _;
     }
 
     function _less(uint256 ptrA, uint256 ptrB)
@@ -71,13 +77,13 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         if (pOrder.price <= lastPrice *2) revert PxOverflow();
         if (pOrder.price >= lastPrice /2) revert PxUnderflow();
 
-        if (margin* MAX_LEVERAGE / 100 >= pOrder.size * pOrder.price) 
+        if (margin* maxLeverage / 100 >= pOrder.size * pOrder.price) 
             revert LeverageOverflow();
 
         // Transfer margin from Vault contract to pool
         IVault(vault).internalTransfer(msg.sender, address(this), margin);
         // Then create position NFT for manage and query
-        newPosId = IPosition(positionNFT).newNFT(pOrder, msg.sender);
+        newPosId = IPosition(positionNFT).newNFT(pOrder, msg.sender, margin);
 
         // update order info 
         OBPx[newPosId] = pOrder.price;
@@ -104,7 +110,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         if ( pos.status == posStatus.pendingOpen ) {
 
             isSellOrder = pos.isShort;
-            if( pos.pendingSize == 0 ) revert(); 
+            if( pos.pendingSize == 0 ) revert InvalidStatus(); 
 
             remove( isSellOrder ?_ask_OB:_bid_OB, OrderId.unwrap(orderId));
             pos.pendingSize = 0;
@@ -112,7 +118,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         } else if ( pos.status == posStatus.pendingClose ) {
 
             isSellOrder = !pos.isShort;
-            if( pos.openSize == 0 ) revert(); 
+            if( pos.openSize == 0 ) revert InvalidStatus(); 
 
             remove( isSellOrder ?_bid_OB:_ask_OB, OrderId.unwrap(orderId));
 
@@ -133,7 +139,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
 
     function closePosition(OrderId orderId, PoolOrder memory pOrder)
         external
-        returns (OrderId orderId)
+        returns (OrderId)
     {
         // Price sanity check
         if (pOrder.price <= lastPrice *2) revert PxOverflow();
@@ -147,12 +153,12 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         pos = IPosition(positionNFT).getPosition(orderId);
 
         // Verify position is open
-        if(pos.status != posStatus.open) revert InvaildStatus();
+        if(pos.status != posStatus.open) revert InvalidStatus();
 
         // Verify closing direction is opposite to position direction
         // Long position (isShort=false) must close with sell (isSell=true)
         // Short position (isShort=true) must close with buy (isSell=false)
-        if(pOrder.isSell == pos.isShort) revert InvaildStatus();
+        if(pOrder.isSell == pos.isShort) revert InvalidStatus();
 
         // Verify closing size doesn't exceed open size
         // If exceeds, fix order size with max size
@@ -203,16 +209,16 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
             // Short: profit when sell high, buy low
             // PnL = openAmount - closeAmount + funding change
             pnl = int256(pos.openAmount) - int256(pos.closeAmount);
-            pnl -= int256(pos.openFundingIdx - pos.closeFundingIdx);
+            pnl -= int256(pos.openFundingIdx) - int256(pos.closeFundingIdx);
         } else {
             // Long: profit when buy low, sell high
             // PnL = closeAmount - openAmount + funding change
             pnl = int256(pos.closeAmount) - int256(pos.openAmount);
-            pnl += int256(pos.openFundingIdx - pos.closeFundingIdx);
+            pnl += int256(pos.openFundingIdx) - int256(pos.closeFundingIdx);
         }
 
         // Convert PnL to currency amount (divide by decimal)
-        int256 pnlAmount = pnl / 10**curDecimalConvert;
+        int256 pnlAmount = pnl / int256( 10**curDecimalConvert ) -1;
 
         // Calculate final return = openMargin + PnL
         uint256 finalReturn;
@@ -248,9 +254,9 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         returns (OrderId oid, uint256 size, uint256 price)
     {
         if(isSell){
-            oid = OrderId.wrap(query_min( _ask_OB ));
+            oid = OrderId.wrap(getMin( _ask_OB ));
         } else {
-            oid = OrderId.wrap(query_max( _bid_OB ));
+            oid = OrderId.wrap(getMax( _bid_OB ));
         }
         size = OBSize[oid];
         price = OBPx[oid];
@@ -259,10 +265,20 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     // ------------ Administration Function Part ------------ //
 
     /**
+     * @notice Update new Oracle Price
+     * @param newPrice New Oracle Price
+     */
+    function updateOraclePrice(uint256 newPrice) external onlyOracle
+    {
+        oraclePrice = newPrice;
+    }
+
+    /**
      * @notice Update new Funding Index
      * @param newFundingIdx New Funding Index
      */
-    function updateFundingIndex(uint256 newFundingIdx) external onlyOwner {
+    function updateFundingIndex(uint256 newFundingIdx) external onlyOracle 
+    {
         fundingIdx = newFundingIdx;
     }
 
@@ -271,7 +287,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
      * @param to Address to send fees to
      */
     function collectFees(address to) external onlyOwner {
-        if(feeCollected == 0) revert InvaildStatus();
+        if(feeCollected == 0) revert InvalidStatus();
         uint256 amount = feeCollected;
         feeCollected = 0;
         IVault(vault).internalTransfer(address(this), to, amount);
@@ -279,7 +295,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
 
     // ------------ Internal Function Part ------------ //
 
-    function orderMatching(OrderId takerId, PoolOrder calldata pOrder)
+    function orderMatching(OrderId takerId, PoolOrder memory pOrder)
         private
     {
         uint256 _size = pOrder.size;
@@ -397,9 +413,10 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     // Update Position information after orders matched
     function updatePosSize(Position memory pos, uint256 fillSize, uint256 fillPrice)
         private 
+        view
         returns ( Position memory )
     {
-        int128 fundingChange = int128(fillSize * fundingIdx);
+        uint256 fundingChange = uint256(fillSize * fundingIdx);
         if ( pos.status == posStatus.pendingOpen ) {
             pos.pendingSize -= fillSize;
             pos.openSize += fillSize;
@@ -448,9 +465,9 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         uint256 _bid1Price
     ) {
         _lastPrice = lastPrice;
-        uint256 askMinKey = _ask_OB.min();
+        uint256 askMinKey = getMin(_ask_OB);
         _ask1Price = (askMinKey != 0) ? OBPx[OrderId.wrap(askMinKey)] : 0;
-        uint256 bidMaxKey = _bid_OB.max();
+        uint256 bidMaxKey = getMax(_bid_OB);
         _bid1Price = (bidMaxKey != 0) ? OBPx[OrderId.wrap(bidMaxKey)] : 0;
     }
 
@@ -460,8 +477,8 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     */
     function getPoolInfo() external view
         returns (
-            string des,
-            uint256 lastPrice
+            string memory,
+            uint256 
         ) 
     {
         // TBD

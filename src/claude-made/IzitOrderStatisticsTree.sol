@@ -47,6 +47,7 @@ abstract contract IzitOrderStatisticsTree {
 
     function _less(uint256 ptr_a, uint256 ptr_b)
         internal
+        view
         virtual
     returns (bool);
 

@@ -1,0 +1,249 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import {Ownable} from "./libraries/Ownable.sol";
+import {IPool} from "./interfaces/IPool.sol";
+
+/**
+ * @title IndexOracle and Funding rate contract
+ * @notice Oracle for CS2 item prices
+ */
+contract IndexOracle is Ownable {
+
+    address public factory;
+
+    uint256 public settlementPeriod = 8 hours;
+    uint256 public lastFundingTime;
+
+    // Funding rate parameters (in basis points, 1 bp = 0.01%)
+    int256 public constant BASIS_POINT = 10000;      // 100% = 10000 bp
+    int256 public constant BASE_RATE = 3;            // 0.03% = 3 bp (daily base rate)
+    int256 public constant CLAMP_RANGE = 5;          // 0.05% = 5 bp
+    int256 public constant DEPTH_WEIGHTED_AMOUNT_BASE = 200; // 200 USDT per max leverage
+
+    // Funding rate limits (configurable)
+    int256 public fundingRateCap = 200;    // 2% = 200 bp
+    int256 public fundingRateFloor = -200; // -2% = -200 bp
+
+    /**
+     * Premium Index Calculation Formula:
+     *
+     * Premium Index = [max(0, Depth Weighted Bid - Index Price) - max(0, Index Price - Depth Weighted Ask)] / Index Price
+     *
+     * Average Premium Index uses weighted average algorithm from past settlement period:
+     * Avg Premium Index = (1×P1 + 2×P2 + ... + n×Pn) / (1+2+...+n)
+     *
+     * Funding Rate = clamp[Avg Premium Index + clamp(Interest Rate - Avg Premium Index, 0.05%, -0.05%), Cap, Floor]
+     *
+     * Interest Rate = 0.03% / (24 hours / Settlement Period)
+    */
+
+    struct PoolFundingData {
+        // EVM Slot 0
+        uint64 lastFundingTime;    // Last Funding time of this pool
+        uint64 sampleCount;        // Number of samples in current period
+        uint128 cumWeight;          // Cumulative weight sum
+        // EVM Slot 1
+        int256 cumWeightedPremium;  // Cumulative weighted premium index
+    }
+
+    mapping(address => bool) private authorizedPools;
+    mapping(address => uint256) public indexPrice;           // Index price for each pool
+    mapping(address => PoolFundingData) private poolData;     // Premium accumulator
+
+    event FundingRateCalculated(address indexed pool, int256 fundingRate, int256 avgPremiumIndex, int256 interestRate);
+    event IndexPriceUpdated(address indexed pool, uint256 newPrice);
+    event PremiumIndexSampled(address indexed pool, int256 premiumIndex, uint256 weight);
+    event SettlementPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
+
+    error UnauthorizedPool();
+
+    constructor() Ownable(msg.sender) {
+        factory = msg.sender;
+        lastFundingTime = block.timestamp;
+    }
+
+    modifier onlyPool(address pool) {
+        if(!authorizedPools[pool]) revert UnauthorizedPool();
+        _;
+    }
+
+    /**
+     * @notice Update Authorized Pool address
+     * @param pool pool address
+     */
+    function addPool(address pool) external onlyOwner {
+        authorizedPools[pool] = true;
+    }
+
+    /**
+     * @notice Update index price for a pool (called by authorized oracle)
+     * @param pool The pool address
+     * @param newIndexPrice The new index price
+     */
+    function updateIndexPrice(address pool, uint256 newIndexPrice) external onlyOwner onlyPool(pool) {
+        require(newIndexPrice > 0, "Invalid index price");
+        indexPrice[pool] = newIndexPrice;
+        emit IndexPriceUpdated(pool, newIndexPrice);
+    }
+
+    /**
+     * @notice 
+     * @dev When a new trade matches, pool call the oracle to update
+     * @param size The matched trading size
+     * @param price The matched trading price
+     */
+    function updatePoolInfo(uint256 size, uint256 price) external onlyPool(msg.sender) {
+
+        uint256 timeWeight = block.timestamp - lastFundingTime;
+        PoolFundingData memory data = poolData[msg.sender];
+
+        data.sampleCount++;
+        data.cumWeight += size * timeWeight;
+        data.cumWeightedPremium += price * size * timeWeight;
+
+        poolData[msg.sender] = data;
+
+    }
+
+    /**
+     * @notice Calculate interest rate based on settlement period
+     * @dev Interest Rate = 0.03% / (24 hours / Settlement Period)
+     * @return interestRate Interest rate in basis points
+     *
+     * Example:
+     * - 8 hour period: 0.03% / (24/8) = 0.03% / 3 = 0.01% = 1 bp
+     * - 4 hour period: 0.03% / (24/4) = 0.03% / 6 = 0.005% = 0.5 bp
+     */
+    function calculateInterestRate() public view returns (int256 interestRate) {
+        // BASE_RATE = 3 bp (0.03%)
+        // periodsPerDay = 24 hours / settlementPeriod
+        uint256 periodsPerDay = 24 hours / settlementPeriod;
+        require(periodsPerDay > 0, "Invalid settlement period");
+
+        // Interest Rate = BASE_RATE / periodsPerDay
+        interestRate = BASE_RATE / int256(periodsPerDay);
+
+        return interestRate;
+    }
+
+    /**
+     * @notice Calculate funding rate for a pool
+     * @dev Formula: fundingRate = clamp[avgPremiumIndex + clamp(interestRate - avgPremiumIndex, 0.05%, -0.05%), cap, floor]
+     * @param pool The pool address
+     * @return fundingRate The calculated funding rate in basis points
+     * @return avgPremiumIndex The average premium index used
+     * @return interestRate The interest rate used
+     */
+    function calculateFundingRate(address pool)
+        public
+        view
+        returns (
+            int256 fundingRate,
+            int256 avgPremiumIndex,
+            int256 interestRate
+        )
+    {
+        // Step 1: Calculate average premium index
+        avgPremiumIndex = getAvgPremiumIndex(pool);
+
+        // Step 2: Calculate interest rate based on settlement period
+        interestRate = calculateInterestRate();
+
+        // Step 3: Calculate (interestRate - avgPremiumIndex)
+        int256 interestDiff = interestRate - avgPremiumIndex;
+
+        // Step 4: Inner clamp - limit to [-0.05%, 0.05%] = [-5bp, 5bp]
+        int256 clampedDiff = clamp(interestDiff, -CLAMP_RANGE, CLAMP_RANGE);
+
+        // Step 5: Add to average premium index
+        int256 rawFundingRate = avgPremiumIndex + clampedDiff;
+
+        // Step 6: Outer clamp - limit to [floor, cap]
+        fundingRate = clamp(rawFundingRate, fundingRateFloor, fundingRateCap);
+
+        return (fundingRate, avgPremiumIndex, interestRate);
+    }
+
+    /**
+     * @notice Apply funding rate to pool and reset accumulator
+     * @dev Should be called at the end of each settlement period
+     * @param pool The pool address
+     */
+    function applyFundingRate(address pool) external onlyOwner onlyPool(pool){
+        require(block.timestamp >= lastFundingTime + settlementPeriod, "Settlement period not reached");
+
+        (int256 fundingRate, int256 avgPremiumIndex, int256 interestRate) = calculateFundingRate(pool);
+
+        // Convert funding rate to funding index update
+        // The funding index accumulates over time
+        // If fundingRate is positive, longs pay shorts; if negative, shorts pay longs
+        uint256 currentFundingIdx = IPool(pool).fundingIdx();
+
+        // Calculate funding index change
+        // newFundingIdx = currentFundingIdx * (1 + fundingRate/BASIS_POINT)
+        int256 fundingChange = int256(currentFundingIdx) * fundingRate / BASIS_POINT;
+        uint256 newFundingIdx = uint256(int256(currentFundingIdx) + fundingChange);
+
+        // Update pool's funding index
+        IPool(pool).updateFundingIndex(newFundingIdx);
+
+        // Reset accumulators for next period
+        delete poolData[pool];
+        lastFundingTime = block.timestamp;
+
+        emit FundingRateCalculated(pool, fundingRate, avgPremiumIndex, interestRate);
+    }
+
+    /**
+     * @notice Get average premium index for a pool
+     * @dev Avg Premium Index = cumWeightedPremium / cumWeight
+     * @param pool The pool address
+     * @return Average premium index in basis points
+     */
+    function getAvgPremiumIndex(address pool) public view returns (int256) {
+        PoolFundingData storage data = poolData[pool];
+        if (data.cumWeight == 0) return 0;
+        return data.cumWeightedPremium / int256(data.cumWeight);
+    }
+
+    /**
+     * @notice Get premium data statistics
+     * @param pool The pool address
+     * @return sampleCount Number of samples collected
+     * @return avgPremiumIndex Average premium index
+     */
+    function getPoolsStats(address pool)
+        external
+        view
+        returns (uint256 sampleCount, int256 avgPremiumIndex)
+    {
+        poolData storage data = poolData[pool];
+        return (data.sampleCount, getAvgPremiumIndex(pool));
+    }
+
+    /**
+     * @notice Clamp a value between min and max
+     * @param value The value to clamp
+     * @param min Minimum value
+     * @param max Maximum value
+     * @return Clamped value
+     */
+    function clamp(int256 value, int256 min, int256 max) internal pure returns (int256) {
+        if (value < min) return min;
+        if (value > max) return max;
+        return value;
+    }
+
+    /**
+     * @notice Update funding rate limits
+     * @param newCap New funding rate cap (in basis points)
+     * @param newFloor New funding rate floor (in basis points)
+     */
+    function setFundingRateLimits(int256 newCap, int256 newFloor) external onlyOwner {
+        require(newCap > newFloor, "Cap must be greater than floor");
+        fundingRateCap = newCap;
+        fundingRateFloor = newFloor;
+    }
+
+}
