@@ -1,11 +1,8 @@
 import './globals.css';
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
 import { Providers } from './providers';
 import { Header } from '@/components/layout/Header';
 import { Toaster } from 'react-hot-toast';
-
-const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
   title: 'CS2InDEX - Decentralized CS2 Item Perpetual Trading',
@@ -19,11 +16,11 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className="antialiased font-sans">
         <Providers>
-          <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900">
+          <div className="min-h-screen">
             <Header />
-            <main className="container mx-auto px-4 py-8">
+            <main>
               {children}
             </main>
             <Toaster

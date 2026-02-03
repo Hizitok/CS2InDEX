@@ -115,7 +115,84 @@ export const POOL_ABI = [
       { name: 'bidMax', type: 'uint256' },
     ],
     stateMutability: 'view',
+
     type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'getOrderbookInfo',
+    outputs: [
+      { name: 'lastPrice', type: 'uint256' },
+      { name: 'askPrice', type: 'uint256' },
+      { name: 'bidPrice', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'fundingIdx',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'maxLeverage',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'oraclePrice',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'oracle',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'vault',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'positionNFT',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'orderId', type: 'uint256' },
+      { indexed: true, name: 'trader', type: 'address' },
+      { indexed: false, name: 'isSell', type: 'bool' },
+      { indexed: false, name: 'size', type: 'uint256' },
+      { indexed: false, name: 'price', type: 'uint256' },
+    ],
+    name: 'OrderCreated',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'orderId', type: 'uint256' },
+      { indexed: true, name: 'matchedOrderId', type: 'uint256' },
+      { indexed: false, name: 'size', type: 'uint256' },
+      { indexed: false, name: 'price', type: 'uint256' },
+    ],
+    name: 'OrderMatched',
+    type: 'event',
   },
 ] as const;
 
@@ -188,6 +265,20 @@ export const ERC20_ABI = [
     inputs: [],
     name: 'decimals',
     outputs: [{ name: '', type: 'uint8' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+export const INDEX_ORACLE_ABI = [
+  {
+    inputs: [{ name: 'pool', type: 'address' }],
+    name: 'calculateFundingRate',
+    outputs: [
+      { name: 'fundingRate', type: 'int256' },
+      { name: 'avgPremiumIndex', type: 'int256' },
+      { name: 'interestRate', type: 'int256' },
+    ],
     stateMutability: 'view',
     type: 'function',
   },

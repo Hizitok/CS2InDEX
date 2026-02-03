@@ -1,236 +1,370 @@
 'use client';
 
-import { useState } from 'react';
+/**
+ * @fileoverview 交易核心组件 (Trading Interface)
+ * 负责处理用户开仓操作 (Long/Short)，包含限价/市价单逻辑、杠杆计算及风险校验。
+ * 遵循 Google TypeScript Style Guide。
+ *
+ * @author Senior Architect
+ */
+
+import { useState, useMemo, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { parseUnits } from 'viem';
+import { parseUnits, formatUnits } from 'viem';
 import toast from 'react-hot-toast';
 import { POOL_ABI } from '@/config/contracts';
-import { TrendingUp, TrendingDown } from 'lucide-react';
+import { TrendingUp, TrendingDown, Info, Wallet, Calculator } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { useLanguage } from '@/contexts/LanguageContext';
 
-const ITEMS = [
-  { name: 'AK47-Redline', pool: '0x...' },
-  { name: 'AWP-Dragon Lore', pool: '0x...' },
-  { name: 'M4A4-Howl', pool: '0x...' },
-];
+/**
+ * 交易标的物接口定义
+ * @interface TradeItem
+ */
+// Index Configuration
+const INDEX_ASSET = {
+  name: 'CS2 Market Index',
+  pool: '0x0000000000000000000000000000000000000000' // Placeholder
+};
 
+const MAX_LEVERAGE = 6; // 最大杠杆倍数
+
+/**
+ * 交易界面组件
+ * 提供开仓、杠杆预览、风险提示等功能。
+ */
 export function TradingInterface() {
   const { address } = useAccount();
-  const [selectedItem, setSelectedItem] = useState(ITEMS[0]);
-  const [isLong, setIsLong] = useState(true);
-  const [size, setSize] = useState('');
-  const [price, setPrice] = useState('');
-  const [margin, setMargin] = useState('');
+  const { t } = useLanguage();
+
+  // 组件状态
+  const selectedItem = INDEX_ASSET;
+  const [isLong, setIsLong] = useState<boolean>(true);
+  const [size, setSize] = useState<string>('1'); // 数量 (Default 1)
+  const [price, setPrice] = useState<string>('100'); // 价格 (Limit Order) - Default 100 for better demo
+  const [margin, setMargin] = useState<string>(''); // 保证金 (USDC)
+  const [leverage, setLeverage] = useState<number>(2); // Default 2x
   const [orderType, setOrderType] = useState<'Limit' | 'Market'>('Limit');
+  const [manualMargin, setManualMargin] = useState<boolean>(false); // Track if user edited margin
 
-  const { writeContract, data: hash } = useWriteContract();
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
+  // 合约交互 Hooks
+  const { writeContract, data: hash, error: writeError } = useWriteContract();
+  const { isLoading: isConfirming, isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
 
+  // ---------------------------------------------------------------------------
+  // Auto-Calculation Logic
+  // ---------------------------------------------------------------------------
+
+  // Calculate Margin based on Size & Leverage (when Size or Leverage changes, and NOT manual margin mode)
+  useEffect(() => {
+    if (manualMargin) return;
+
+    if (!size || (orderType === 'Limit' && !price)) return;
+
+    const effectivePrice = orderType === 'Limit' ? parseFloat(price) : 100; // Mock 100 if Market for now
+    if (isNaN(effectivePrice) || effectivePrice <= 0) return;
+
+    const positionValue = parseFloat(size) * effectivePrice;
+    if (isNaN(positionValue)) return;
+
+    const requiredMargin = positionValue / leverage;
+    setMargin(requiredMargin.toFixed(2));
+  }, [size, price, leverage, orderType, manualMargin]);
+
+  // If user changes Leverage Slider -> Reset Manual Mode -> Trigger Effect
+  const handleLeverageChange = (newLeverage: number) => {
+    setManualMargin(false);
+    setLeverage(newLeverage);
+  };
+
+  // If user types Margin -> Set Manual Mode -> Update Leverage Display
+  const handleMarginChange = (newMargin: string) => {
+    setMargin(newMargin);
+    setManualMargin(true);
+
+    // Reverse calc leverage for display
+    const m = parseFloat(newMargin);
+    const s = parseFloat(size);
+    const p = orderType === 'Limit' ? parseFloat(price || '0') : 100;
+
+    if (m > 0 && s > 0 && p > 0) {
+      const impliedLev = (s * p) / m;
+      // Don't update state `leverage` directly to strictly follow slider, 
+      // but we could visually show it. For now, let's just let it drift visually or update state?
+      // Better to update state so slider moves? 
+      // If we update state, the effect triggers and overwrites margin. Infinite loop risk if not careful.
+      // So we won't update `leverage` state here, just let it be "Custom".
+    }
+  };
+
+  /**
+   * Derived Calculations for UI
+   */
+  const derivedInfo = useMemo(() => {
+    const s = parseFloat(size) || 0;
+    const p = orderType === 'Limit' ? parseFloat(price || '0') : 100; // Mock current price
+    const m = parseFloat(margin) || 0;
+
+    const positionValue = s * p;
+    const currentLeverage = m > 0 ? positionValue / m : 0;
+
+    // Est. Liquidation Price
+    // Long Liq = Entry * (1 - 1/Lev)
+    // Short Liq = Entry * (1 + 1/Lev)
+    let liqPrice = 0;
+    if (currentLeverage > 0) {
+      if (isLong) {
+        liqPrice = p * (1 - 1 / currentLeverage);
+      } else {
+        liqPrice = p * (1 + 1 / currentLeverage);
+      }
+    }
+
+    const tradingFee = positionValue * 0.001; // 0.1%
+    const totalCost = m + tradingFee;
+
+    return {
+      leverage: currentLeverage,
+      liqPrice: Math.max(0, liqPrice),
+      fee: tradingFee,
+      totalCost,
+      isRisky: currentLeverage > MAX_LEVERAGE || currentLeverage < 1
+    };
+  }, [size, price, margin, isLong, orderType]);
+
+
+  /**
+   * 处理表单提交 (提交订单)
+   */
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!address) {
-      toast.error('Please connect your wallet');
+      toast.error(t.trading.pleaseConnect);
+      return;
+    }
+
+    if (derivedInfo.isRisky && orderType === 'Limit') {
+      toast.error(`Leverage abnormal (${derivedInfo.leverage.toFixed(2)}x). Max ${MAX_LEVERAGE}x`);
       return;
     }
 
     try {
-      const order = {
-        isSell: !isLong, // Long = buy, Short = sell
-        oType: orderType === 'Limit' ? 1 : 0, // 0 = Market, 1 = Limit
+      const orderArgs = {
+        isSell: !isLong,
+        oType: orderType === 'Limit' ? 1 : 0,
         size: BigInt(size),
         priceX100: orderType === 'Limit' ? parseUnits(price, 2) : BigInt(0),
-        margin: parseUnits(margin, 6), // USDC has 6 decimals
+        margin: parseUnits(margin, 6),
       };
+
+      console.log('Submitting Order:', orderArgs);
 
       writeContract({
         address: selectedItem.pool as `0x${string}`,
         abi: POOL_ABI,
         functionName: 'newOrder',
-        args: [order],
+        args: [orderArgs],
       });
 
-      toast.success('Order submitted!');
-    } catch (error: any) {
-      toast.error(error.message || 'Transaction failed');
+      toast.loading(t.trading.confirmInWallet);
+    } catch (error: unknown) {
+      console.error('Order Error:', error);
+      const errorMsg = error instanceof Error ? error.message : t.trading.unknownError;
+      toast.error(`${t.trading.txFailed}: ${errorMsg}`);
     }
   };
 
-  const leverage = margin && size && price
-    ? ((parseFloat(size) * parseFloat(price)) / parseFloat(margin)).toFixed(2)
-    : '0';
-
   return (
-    <div className="card">
-      <h2 className="text-2xl font-bold mb-6">Open Position</h2>
+    <div className="glass-card rounded-2xl p-6 h-full border border-white/5 bg-[#0a0a0a]/60 backdrop-blur-xl">
+      <div className="flex justify-between items-center mb-6">
+        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <Calculator className="text-accent-cyan" size={24} />
+          {isLong ? t.trading.long : t.trading.short} {INDEX_ASSET.name}
+        </h2>
+
+        {/* Leverage Display */}
+        <div className={`px-3 py-1 rounded-full text-sm font-bold border ${derivedInfo.isRisky ? 'border-red-500 text-red-400 bg-red-500/10' : 'border-accent-cyan/30 text-accent-cyan bg-accent-cyan/10'
+          }`}>
+          {derivedInfo.leverage.toFixed(2)}x {t.trading.leverage}
+        </div>
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Item Selection */}
-        <div>
-          <label className="label">Select Item</label>
-          <select
-            className="input"
-            value={selectedItem.name}
-            onChange={(e) => setSelectedItem(ITEMS.find(i => i.name === e.target.value)!)}
+
+        {/* Direction Toggle (Segmented Control) */}
+        <div className="bg-black/40 p-1 rounded-xl grid grid-cols-2 gap-1">
+          <button
+            type="button"
+            onClick={() => setIsLong(true)}
+            className={`py-3 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 ${isLong
+              ? 'bg-green-500 text-white shadow-lg shadow-green-500/20'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
           >
-            {ITEMS.map(item => (
-              <option key={item.name} value={item.name}>
-                {item.name}
-              </option>
-            ))}
-          </select>
+            <TrendingUp size={16} />
+            {t.trading.long}
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsLong(false)}
+            className={`py-3 rounded-lg font-bold text-sm transition-all flex items-center justify-center gap-2 ${!isLong
+              ? 'bg-red-500 text-white shadow-lg shadow-red-500/20'
+              : 'text-gray-400 hover:text-white hover:bg-white/5'
+              }`}
+          >
+            <TrendingDown size={16} />
+            {t.trading.short}
+          </button>
         </div>
 
-        {/* Long/Short Toggle */}
-        <div>
-          <label className="label">Direction</label>
-          <div className="grid grid-cols-2 gap-4">
+        {/* Order Type Tabs */}
+        <div className="flex border-b border-white/10">
+          {['Limit', 'Market'].map((type) => (
             <button
+              key={type}
               type="button"
-              onClick={() => setIsLong(true)}
-              className={`py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
-                isLong
-                  ? 'bg-green-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
+              onClick={() => setOrderType(type as 'Limit' | 'Market')}
+              className={`pb-2 px-4 text-sm font-bold transition-all border-b-2 ${orderType === type
+                ? 'border-accent-cyan text-white'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
+                }`}
             >
-              <TrendingUp size={20} />
-              Long
+              {type === 'Limit' ? t.trading.limit : t.trading.market}
             </button>
-            <button
-              type="button"
-              onClick={() => setIsLong(false)}
-              className={`py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
-                !isLong
-                  ? 'bg-red-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              <TrendingDown size={20} />
-              Short
-            </button>
+          ))}
+        </div>
+
+        {/* Price & Size Inputs */}
+        <div className="space-y-4">
+          {/* Price Input */}
+          {orderType === 'Limit' && (
+            <div className="space-y-1">
+              <div className="flex justify-between text-xs text-gray-400">
+                <span>{t.trading.price}</span>
+                <span>{t.trading.oracle}: $102.50</span>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  className="w-full bg-black/40 border border-white/10 rounded-lg py-3 px-4 text-white font-mono focus:border-accent-cyan focus:outline-none transition-colors"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                />
+                <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 text-xs">USDC</span>
+              </div>
+            </div>
+          )}
+
+          {/* Size Input */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-gray-400">
+              <span>{t.trading.size}</span>
+              <span>{t.trading.max}: 100</span>
+            </div>
+            <div className="relative">
+              <input
+                type="number"
+                className="w-full bg-black/40 border border-white/10 rounded-lg py-3 px-4 text-white font-mono focus:border-accent-cyan focus:outline-none transition-colors"
+                value={size}
+                onChange={(e) => setSize(e.target.value)}
+              />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 text-xs text-right">
+                {t.trading.contracts} <br /> (Index)
+              </span>
+            </div>
           </div>
         </div>
 
-        {/* Order Type */}
-        <div>
-          <label className="label">Order Type</label>
-          <div className="grid grid-cols-2 gap-4">
-            <button
-              type="button"
-              onClick={() => setOrderType('Limit')}
-              className={`py-2 rounded-lg font-medium transition-colors ${
-                orderType === 'Limit'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              Limit
-            </button>
-            <button
-              type="button"
-              onClick={() => setOrderType('Market')}
-              className={`py-2 rounded-lg font-medium transition-colors ${
-                orderType === 'Market'
-                  ? 'bg-primary-600 text-white'
-                  : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-              }`}
-            >
-              Market
-            </button>
+        {/* Leverage Slider */}
+        <div className="space-y-3 pt-2">
+          <div className="flex justify-between items-center text-sm">
+            <span className="text-gray-400">{t.trading.leverage}</span>
+            <span className="text-accent-cyan font-bold">{leverage}x</span>
           </div>
-        </div>
-
-        {/* Size */}
-        <div>
-          <label className="label">Size (units)</label>
           <input
-            type="number"
-            className="input"
-            value={size}
-            onChange={(e) => setSize(e.target.value)}
-            placeholder="10"
-            required
+            type="range"
             min="1"
+            max="6"
             step="1"
+            value={leverage}
+            onChange={(e) => handleLeverageChange(parseInt(e.target.value))}
+            className="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-accent-cyan hover:accent-accent-cyan/80"
           />
+          <div className="flex justify-between text-[10px] text-gray-500 px-1 font-mono">
+            <span>1x</span>
+            <span>2x</span>
+            <span>3x</span>
+            <span>4x</span>
+            <span>5x</span>
+            <span>6x</span>
+          </div>
         </div>
 
-        {/* Price (only for limit orders) */}
-        {orderType === 'Limit' && (
-          <div>
-            <label className="label">Price (USD)</label>
+        {/* Margin Input (Auto-calculated but editable) */}
+        <div className="space-y-1">
+          <div className="flex justify-between text-xs text-gray-400">
+            <span>{t.trading.reqMargin}</span>
+            <span className="text-accent-cyan">{t.trading.balance}: $5000.00</span>
+          </div>
+          <div className="relative">
             <input
               type="number"
-              className="input"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-              placeholder="500.00"
-              required
-              min="0.01"
-              step="0.01"
+              className={`w-full bg-black/40 border rounded-lg py-3 px-4 text-white font-mono focus:outline-none transition-colors ${manualMargin ? 'border-yellow-500/50' : 'border-white/10 focus:border-accent-cyan'
+                }`}
+              value={margin}
+              onChange={(e) => handleMarginChange(e.target.value)}
             />
+            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500 text-xs">USDC</span>
           </div>
-        )}
-
-        {/* Margin */}
-        <div>
-          <label className="label">Margin (USDC)</label>
-          <input
-            type="number"
-            className="input"
-            value={margin}
-            onChange={(e) => setMargin(e.target.value)}
-            placeholder="1000.00"
-            required
-            min="0.01"
-            step="0.01"
-          />
-          <p className="text-sm text-gray-400 mt-2">
-            Max leverage: 6x
-          </p>
+          {manualMargin && <p className="text-[10px] text-yellow-500/80 pl-1">{t.trading.manualOverride}</p>}
         </div>
 
-        {/* Info */}
-        {size && margin && (orderType === 'Market' || price) && (
-          <div className="bg-gray-700/50 rounded-lg p-4 space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-400">Leverage:</span>
-              <span className={`font-semibold ${parseFloat(leverage) > 6 ? 'text-red-500' : 'text-white'}`}>
-                {leverage}x
-                {parseFloat(leverage) > 6 && ' ⚠️ Too high'}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Position Value:</span>
-              <span className="text-white">
-                ${orderType === 'Market' ? 'Market Price' : (parseFloat(size) * parseFloat(price)).toFixed(2)}
-              </span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Liquidation Price:</span>
-              <span className="text-red-400">
-                Calculated after open
-              </span>
-            </div>
+        {/* Order Summary Card */}
+        <div className="bg-white/5 rounded-xl p-4 space-y-2 text-xs border border-white/5">
+          <div className="flex justify-between">
+            <span className="text-gray-500">{t.trading.entryPrice}</span>
+            <span className="text-white font-mono">${orderType === 'Limit' ? price : t.trading.market}</span>
           </div>
-        )}
+          <div className="flex justify-between">
+            <span className="text-gray-500">{t.trading.liqPrice}</span>
+            <span className={`font-mono ${isLong ? 'text-red-400' : 'text-green-400'}`}>
+              ${derivedInfo.liqPrice.toFixed(2)}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-500">{t.trading.fee} (0.1%)</span>
+            <span className="text-gray-300 font-mono">${derivedInfo.fee.toFixed(2)}</span>
+          </div>
+          <div className="border-t border-white/10 my-2 pt-2 flex justify-between font-bold">
+            <span className="text-gray-400">{t.trading.totalCost}</span>
+            <span className="text-white font-mono">${derivedInfo.totalCost.toFixed(2)}</span>
+          </div>
+        </div>
 
-        {/* Submit */}
-        <button
+        {/* Submit Button */}
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
           type="submit"
-          disabled={isConfirming || parseFloat(leverage) > 6}
-          className={`w-full py-4 rounded-lg font-bold text-lg transition-colors ${
-            isLong
-              ? 'bg-green-600 hover:bg-green-700 text-white'
-              : 'bg-red-600 hover:bg-red-700 text-white'
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          disabled={isConfirming || derivedInfo.isRisky}
+          className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${isConfirming ? 'opacity-50 cursor-wait' : ''
+            } ${isLong
+              ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_20px_rgba(34,197,94,0.4)]'
+              : 'bg-red-500 hover:bg-red-400 text-white shadow-[0_0_20px_rgba(239,68,68,0.4)]'
+            } disabled:grayscale disabled:cursor-not-allowed`}
         >
-          {isConfirming
-            ? 'Confirming...'
-            : `Open ${isLong ? 'Long' : 'Short'} Position`
-          }
-        </button>
+          {isConfirming ? (
+            <span className="flex items-center justify-center gap-2">
+              <span className="loading loading-spinner loading-sm"></span>
+              {t.trading.confirming}
+            </span>
+          ) : (
+            `${isLong ? t.trading.buy : t.trading.sell} / ${isLong ? t.trading.long : t.trading.short} $CS2`
+          )}
+        </motion.button>
       </form>
     </div>
   );
 }
+
