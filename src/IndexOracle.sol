@@ -3,12 +3,13 @@ pragma solidity ^0.8.20;
 
 import {Ownable} from "./libraries/Ownable.sol";
 import {IPool} from "./interfaces/IPool.sol";
+import {IOracle} from "./interfaces/IOracle.sol";
 
 /**
  * @title IndexOracle and Funding rate contract
  * @notice Oracle for CS2 item prices
  */
-contract IndexOracle is Ownable {
+contract IndexOracle is Ownable, IOracle {
 
     address public factory;
 
@@ -16,14 +17,14 @@ contract IndexOracle is Ownable {
     uint256 public lastFundingTime;
 
     // Funding rate parameters (in basis points, 1 bp = 0.01%)
-    int256 public constant BASIS_POINT = 10000;      // 100% = 10000 bp
-    int256 public constant BASE_RATE = 3;            // 0.03% = 3 bp (daily base rate)
-    int256 public constant CLAMP_RANGE = 5;          // 0.05% = 5 bp
-    int256 public constant DEPTH_WEIGHTED_AMOUNT_BASE = 200; // 200 USDT per max leverage
+    int128 public constant BASIS_POINT = 10000;      // 100% = 10000 bp
+    int128 public constant BASE_RATE = 3;            // 0.03% = 3 bp (daily base rate)
+    int128 public constant CLAMP_RANGE = 5;          // 0.05% = 5 bp
+    int128 public constant DEPTH_WEIGHTED_AMOUNT_BASE = 200; // 200 USDT per max leverage
 
     // Funding rate limits (configurable)
-    int256 public fundingRateCap = 200;    // 2% = 200 bp
-    int256 public fundingRateFloor = -200; // -2% = -200 bp
+    int128 public fundingRateCap = 200;    // 2% = 200 bp
+    int128 public fundingRateFloor = -200; // -2% = -200 bp
 
     /**
      * Premium Index Calculation Formula:
@@ -44,16 +45,18 @@ contract IndexOracle is Ownable {
         uint64 sampleCount;        // Number of samples in current period
         uint128 cumWeight;          // Cumulative weight sum
         // EVM Slot 1
-        int256 cumWeightedPremium;  // Cumulative weighted premium index
+        uint128 cumWeightedPremium;  // Cumulative weighted premium index
+        uint128 cumWeightedOracle; // cumulative weighted oracle price
     }
 
     mapping(address => bool) private authorizedPools;
-    mapping(address => uint256) public indexPrice;           // Index price for each pool
+    mapping(address => uint256) public oraclePrice;           // Index price for each pool
+    mapping(address => uint256) public updateTime;
     mapping(address => PoolFundingData) private poolData;     // Premium accumulator
 
-    event FundingRateCalculated(address indexed pool, int256 fundingRate, int256 avgPremiumIndex, int256 interestRate);
+    event FundingRateCalculated(address indexed pool, int256 fundingRate, int256 avgVTWAPIndex, int256 interestRate);
     event IndexPriceUpdated(address indexed pool, uint256 newPrice);
-    event PremiumIndexSampled(address indexed pool, int256 premiumIndex, uint256 weight);
+    event VTWAPIndexSampled(address indexed pool, int256 VTWAPIndex, uint256 weight);
     event SettlementPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
 
     error UnauthorizedPool();
@@ -83,7 +86,8 @@ contract IndexOracle is Ownable {
      */
     function updateIndexPrice(address pool, uint256 newIndexPrice) external onlyOwner onlyPool(pool) {
         require(newIndexPrice > 0, "Invalid index price");
-        indexPrice[pool] = newIndexPrice;
+        oraclePrice[pool] = newIndexPrice;
+        updateTime[pool] = block.timestamp;
         emit IndexPriceUpdated(pool, newIndexPrice);
     }
 
@@ -96,11 +100,20 @@ contract IndexOracle is Ownable {
     function updatePoolInfo(uint256 size, uint256 price) external onlyPool(msg.sender) {
 
         uint256 timeWeight = block.timestamp - lastFundingTime;
+        uint128 VTWeight = uint128(timeWeight * uint128(size));
         PoolFundingData memory data = poolData[msg.sender];
-
-        data.sampleCount++;
-        data.cumWeight += size * timeWeight;
-        data.cumWeightedPremium += price * size * timeWeight;
+ 
+        // we use Mixed Volume-weighted and Time-weighted avg Price
+        // VTWAP
+        // Avg Price = \frac{\sum P_i * T_i * V_i}{ \sum T_i * V_i}
+        // If oracle price was updated in last 2 min,
+        // we assume that oracle can be used for premium price calculation 
+        if( block.timestamp - updateTime[msg.sender] <= 120 ) {
+            data.sampleCount++;
+            data.cumWeight += VTWeight;
+            data.cumWeightedPremium += uint128(price) * VTWeight;
+            data.cumWeightedOracle += uint128(oraclePrice[msg.sender]) * VTWeight;
+        }
 
         poolData[msg.sender] = data;
 
@@ -115,54 +128,59 @@ contract IndexOracle is Ownable {
      * - 8 hour period: 0.03% / (24/8) = 0.03% / 3 = 0.01% = 1 bp
      * - 4 hour period: 0.03% / (24/4) = 0.03% / 6 = 0.005% = 0.5 bp
      */
-    function calculateInterestRate() public view returns (int256 interestRate) {
+    function calculateInterestRate() public view returns (int128 interestRate) {
         // BASE_RATE = 3 bp (0.03%)
         // periodsPerDay = 24 hours / settlementPeriod
         uint256 periodsPerDay = 24 hours / settlementPeriod;
         require(periodsPerDay > 0, "Invalid settlement period");
 
         // Interest Rate = BASE_RATE / periodsPerDay
-        interestRate = BASE_RATE / int256(periodsPerDay);
+        interestRate = BASE_RATE / int128( uint128(periodsPerDay) );
 
         return interestRate;
     }
 
     /**
      * @notice Calculate funding rate for a pool
-     * @dev Formula: fundingRate = clamp[avgPremiumIndex + clamp(interestRate - avgPremiumIndex, 0.05%, -0.05%), cap, floor]
+     * @dev Formula: fundingRate = clamp[avgVTWAPDiff + clamp(interestRate - avgVTWAPDiff, 0.05%, -0.05%), cap, floor]
      * @param pool The pool address
-     * @return fundingRate The calculated funding rate in basis points
-     * @return avgPremiumIndex The average premium index used
-     * @return interestRate The interest rate used
+     * @return avgVTWAPDiff The calculated funding rate in basis points
+     * @return interestRate average premium index used
+     * @return fundingRate The interest rate used
      */
     function calculateFundingRate(address pool)
         public
         view
         returns (
-            int256 fundingRate,
-            int256 avgPremiumIndex,
-            int256 interestRate
+            int128 avgVTWAPDiff,
+            int128 interestRate,
+            int128 fundingRate
         )
     {
         // Step 1: Calculate average premium index
-        avgPremiumIndex = getAvgPremiumIndex(pool);
+        uint128 avgVT;
+        uint128 avgVTOracle;
+
+        avgVT = getAvgVTWAPIndex(pool);
+        avgVTOracle = getAvgVTWAPOracle(pool);
+        avgVTWAPDiff = int128(avgVT - avgVTOracle) / int128(avgVTOracle);
 
         // Step 2: Calculate interest rate based on settlement period
         interestRate = calculateInterestRate();
 
-        // Step 3: Calculate (interestRate - avgPremiumIndex)
-        int256 interestDiff = interestRate - avgPremiumIndex;
+        // Step 3: Calculate (interestRate - avgVTWAPDiff)
+        int128 interestDiff = interestRate - avgVTWAPDiff;
 
         // Step 4: Inner clamp - limit to [-0.05%, 0.05%] = [-5bp, 5bp]
-        int256 clampedDiff = clamp(interestDiff, -CLAMP_RANGE, CLAMP_RANGE);
+        int128 clampedDiff = clamp(interestDiff, -CLAMP_RANGE, CLAMP_RANGE);
 
         // Step 5: Add to average premium index
-        int256 rawFundingRate = avgPremiumIndex + clampedDiff;
+        int128 rawFundingRate = avgVTWAPDiff + clampedDiff;
 
         // Step 6: Outer clamp - limit to [floor, cap]
         fundingRate = clamp(rawFundingRate, fundingRateFloor, fundingRateCap);
 
-        return (fundingRate, avgPremiumIndex, interestRate);
+        return (avgVTWAPDiff, fundingRate, interestRate);
     }
 
     /**
@@ -173,7 +191,7 @@ contract IndexOracle is Ownable {
     function applyFundingRate(address pool) external onlyOwner onlyPool(pool){
         require(block.timestamp >= lastFundingTime + settlementPeriod, "Settlement period not reached");
 
-        (int256 fundingRate, int256 avgPremiumIndex, int256 interestRate) = calculateFundingRate(pool);
+        (int256 avgVTWAPRate, int256 interestRate, int256 fundingRate) = calculateFundingRate(pool);
 
         // Convert funding rate to funding index update
         // The funding index accumulates over time
@@ -192,7 +210,7 @@ contract IndexOracle is Ownable {
         delete poolData[pool];
         lastFundingTime = block.timestamp;
 
-        emit FundingRateCalculated(pool, fundingRate, avgPremiumIndex, interestRate);
+        emit FundingRateCalculated(pool, fundingRate, avgVTWAPRate, interestRate);
     }
 
     /**
@@ -201,25 +219,37 @@ contract IndexOracle is Ownable {
      * @param pool The pool address
      * @return Average premium index in basis points
      */
-    function getAvgPremiumIndex(address pool) public view returns (int256) {
-        PoolFundingData storage data = poolData[pool];
+    function getAvgVTWAPIndex(address pool) public view returns (uint128) {
+        PoolFundingData memory data = poolData[pool];
         if (data.cumWeight == 0) return 0;
-        return data.cumWeightedPremium / int256(data.cumWeight);
+        return data.cumWeightedPremium / data.cumWeight;
+    }
+
+    /**
+     * @notice Get average premium oracle px for a pool
+     * @dev Avg Premium Oracle px = cumWeightedOracle / cumWeight
+     * @param pool The pool address
+     * @return Average premium index in basis points
+     */
+    function getAvgVTWAPOracle(address pool) public view returns (uint128) {
+        PoolFundingData memory data = poolData[pool];
+        if (data.cumWeight == 0) return 0;
+        return data.cumWeightedOracle / data.cumWeight;
     }
 
     /**
      * @notice Get premium data statistics
      * @param pool The pool address
      * @return sampleCount Number of samples collected
-     * @return avgPremiumIndex Average premium index
+     * @return avgVTWAPIndex Average premium index
      */
     function getPoolsStats(address pool)
         external
         view
-        returns (uint256 sampleCount, int256 avgPremiumIndex)
+        returns (uint64 sampleCount, uint128 avgVTWAPIndex)
     {
-        poolData storage data = poolData[pool];
-        return (data.sampleCount, getAvgPremiumIndex(pool));
+        PoolFundingData memory data = poolData[pool];
+        return (data.sampleCount, getAvgVTWAPIndex(pool));
     }
 
     /**
@@ -229,7 +259,11 @@ contract IndexOracle is Ownable {
      * @param max Maximum value
      * @return Clamped value
      */
-    function clamp(int256 value, int256 min, int256 max) internal pure returns (int256) {
+    function clamp(int128 value, int128 min, int128 max) 
+        internal 
+        pure 
+        returns (int128) 
+    {
         if (value < min) return min;
         if (value > max) return max;
         return value;
@@ -240,7 +274,7 @@ contract IndexOracle is Ownable {
      * @param newCap New funding rate cap (in basis points)
      * @param newFloor New funding rate floor (in basis points)
      */
-    function setFundingRateLimits(int256 newCap, int256 newFloor) external onlyOwner {
+    function setFundingRateLimits(int128 newCap, int128 newFloor) external onlyOwner {
         require(newCap > newFloor, "Cap must be greater than floor");
         fundingRateCap = newCap;
         fundingRateFloor = newFloor;

@@ -7,98 +7,48 @@ pragma solidity ^0.8.20;
  * @dev Provides price feeds for CS2 indices from external sources
  */
 interface IOracle {
-    /**
-     * @notice Maximum age for price data (30 minutes)
-     */
-    function MAX_PRICE_AGE() external view returns (uint256);
 
-    /**
-     * @notice Add authorized price feeder
-     * @param feeder Price feeder address
-     */
-    function addPriceFeeder(address feeder) external;
+    function oraclePrice(address pool) external view returns (uint256);
 
-    /**
-     * @notice Remove price feeder
-     * @param feeder Price feeder address to remove
-     */
-    function removePriceFeeder(address feeder) external;
+    function updateTime(address pool) external view returns (uint256);
 
     /**
      * @notice Update oracle price
-     * @param newPriceX100 New price multiplied by 100
+     * @param newPrice New price multiplied by 100
      * @dev Only callable by authorized price feeders or owner
      */
-    function updatePrice(uint256 newPriceX100) external;
+    function updateIndexPrice(uint256 newPrice) external;
 
-    /**
-     * @notice Get current price (reverts if stale)
-     * @return Current price multiplied by 100
-     */
-    function getPrice() external view returns (uint256);
+    function updatePoolInfo(uint256 size, uint256 price) external;
 
-    /**
-     * @notice Get price with timestamp
-     * @return price Current price multiplied by 100
-     * @return timestamp Last update timestamp
-     */
-    function getPriceWithTimestamp() external view returns (uint256 price, uint256 timestamp);
+    function calculateInterestRate() external view returns (int128 interestRate);
 
-    /**
-     * @notice Check if price is fresh (within MAX_PRICE_AGE)
-     * @return True if price is fresh
-     */
-    function isPriceFresh() external view returns (bool);
+    function calculateFundingRate(address pool)
+        public
+        view
+    returns (
+        int128 avgVTWAPDiff,
+        int128 interestRate,
+        int128 fundingRate
+    );
 
-    /**
-     * @notice Emergency price update (owner only)
-     * @param newPriceX100 New price to set
-     * @dev Bypasses feeder authorization in emergencies
-     */
-    function emergencyUpdatePrice(uint256 newPriceX100) external;
+    function applyFundingRate(address pool) external;
 
-    /**
-     * @notice Get latest price (view function, doesn't revert)
-     * @return Latest price multiplied by 100
-     */
-    function latestPriceX100() external view returns (uint256);
+    function getAvgVTWAPIndex(address pool) external view returns (uint128);
 
-    /**
-     * @notice Get last update timestamp
-     * @return Last update timestamp
-     */
-    function lastUpdateTime() external view returns (uint256);
+    function getAvgVTWAPOracle(address pool) external view returns (uint128);
 
-    /**
-     * @notice Get price feeder address (legacy single-feeder support)
-     * @return Price feeder address
-     */
-    function priceFeeder() external view returns (address);
+    function getPoolsStats(address pool)
+        external
+        view
+    returns (uint64 sampleCount, uint128 avgVTWAPIndex);
 
-    /**
-     * @notice Check if address is authorized price feeder
-     * @param feeder Address to check
-     * @return True if authorized
-     */
-    function isPriceFeeder(address feeder) external view returns (bool);
-
-    /**
-     * @notice Get price submitted by specific feeder
-     * @param feeder Feeder address
-     * @return price Price submitted by feeder
-     * @return timestamp When feeder submitted price
-     */
-    function feederPrices(address feeder) external view returns (uint256 price, uint256 timestamp);
+    function setFundingRateLimits(int128 newCap, int128 newFloor) external;
 
     // Events
-    event PriceUpdated(
-        address indexed feeder,
-        uint256 oldPrice,
-        uint256 newPrice,
-        uint256 timestamp
-    );
-    event PriceFeederAdded(address indexed feeder);
-    event PriceFeederRemoved(address indexed feeder);
-    event EmergencyPriceUpdate(address indexed updater, uint256 newPrice);
-    event PriceStale(uint256 lastUpdate, uint256 currentTime, uint256 maxAge);
+    event FundingRateCalculated(address indexed pool, int256 fundingRate, int256 avgVTWAPIndex, int256 interestRate);
+    event IndexPriceUpdated(address indexed pool, uint256 newPrice);
+    event VTWAPIndexSampled(address indexed pool, int256 VTWAPIndex, uint256 weight);
+    event SettlementPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
+
 }
