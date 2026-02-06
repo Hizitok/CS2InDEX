@@ -24,7 +24,7 @@ interface IOracle {
     function calculateInterestRate() external view returns (int128 interestRate);
 
     function calculateFundingRate(address pool)
-        public
+        external
         view
     returns (
         int128 avgVTWAPDiff,
@@ -34,9 +34,9 @@ interface IOracle {
 
     function applyFundingRate(address pool) external;
 
-    function getAvgVTWAPIndex(address pool) external view returns (uint128);
+    function getVTWAPIndex(address pool) external view returns (uint128);
 
-    function getAvgVTWAPOracle(address pool) external view returns (uint128);
+    function getVTWAPOracle(address pool) external view returns (uint128);
 
     function getPoolsStats(address pool)
         external

@@ -19,6 +19,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     address public oracle;
     address public positionNFT;
     address public vault;
+    address public engine;
 
     uint256 public fundingIdx = 1 << 126;
     uint256 public lastPrice;
@@ -29,7 +30,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     mapping(OrderId => uint256) internal OBPx;
     mapping(OrderId => uint256) internal OBSize;
 
-    uint256 internal curDecimalConvert;
+    uint256 internal pxDecimals;
     uint256 private feeCollected;
 
     Tree internal _ask_OB; // Sell orders
@@ -47,13 +48,18 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         vault = _vault;
         positionNFT = _positionNFT;
         oracle = _oracle;
-        curDecimalConvert = _curDecimal;
+        pxDecimals = _curDecimal;
         lastPrice = _initialPrice;
         description = _description;
     }
 
     modifier onlyOracle() {
         if( msg.sender != oracle ) revert InvalidOracle();
+        _;
+    }
+
+    modifier onlyEngine() {
+        if( msg.sender != engine ) revert NotAuthorized();
         _;
     }
 
@@ -218,7 +224,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         }
 
         // Convert PnL to currency amount (divide by decimal)
-        int256 pnlAmount = pnl / int256( 10**curDecimalConvert ) -1;
+        int256 pnlAmount = pnl / int256( 10**pxDecimals ) -1;
 
         // Calculate final return = openMargin + PnL
         uint256 finalReturn;
@@ -280,6 +286,41 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     function updateFundingIndex(uint256 newFundingIdx) external onlyOracle 
     {
         fundingIdx = newFundingIdx;
+    }
+
+    /**
+     * @notice Set liquidation engine address (owner only)
+     */
+    function setEngine(address _engine) external onlyOwner {
+        engine = _engine;
+    }
+
+    /**
+     * @notice Force liquidate a position (engine only)
+     * @dev No auth/price sanity checks. Places limit order at bankruptcy price.
+     *      The order goes through normal matching — fills if price is favorable,
+     *      otherwise stays in the orderbook.
+     */
+    function forceLiquidate(OrderId orderId, PoolOrder memory pOrder)
+        external
+        onlyEngine
+    {
+        Position memory pos = IPosition(positionNFT).getPosition(orderId);
+
+        if(pos.status != posStatus.open) revert InvalidStatus();
+        if(pOrder.isSell == pos.isShort) revert InvalidStatus();
+        if(pOrder.size > pos.openSize)
+            pOrder.size = pos.openSize;
+
+        // Mark as liquidating
+        pos.status = posStatus.liquidating;
+        IPosition(positionNFT).updatePosition(orderId, pos);
+
+        // Place into orderbook and run matching
+        OBPx[orderId] = pOrder.price;
+        OBSize[orderId] = pOrder.size;
+
+        orderMatching(orderId, pOrder);
     }
 
     /**
@@ -367,8 +408,8 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         fillSz = (fillMaker)? OBSize[makerID] : OBSize[takerID];
 
         // real currency's amount need to be fixed with currency's decimal, 
-        // so divide 10**curDecimalConvert here
-        matchAmt = fillSz * fillPx / 10**curDecimalConvert;
+        // so divide 10**pxDecimals here
+        matchAmt = fillSz * fillPx / 10**pxDecimals;
 
         buyFee =  matchAmt * (takerIsSell ? MAKERFEE : TAKERFEE) / FEEBASIS;
         sellFee = matchAmt * (takerIsSell ? TAKERFEE : MAKERFEE) / FEEBASIS;
@@ -423,7 +464,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
             pos.openAmount += fillSize * fillPrice;
             pos.openFundingIdx += fundingChange;
             if ( pos.pendingSize == 0) pos.status = posStatus.open;
-        } else if ( pos.status == posStatus.pendingClose )  {
+        } else if ( pos.status == posStatus.pendingClose || pos.status == posStatus.liquidating)  {
             pos.openSize -= fillSize;
             pos.closeSize += fillSize;
             pos.closeAmount += fillSize * fillPrice;

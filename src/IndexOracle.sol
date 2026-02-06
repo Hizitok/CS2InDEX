@@ -54,11 +54,6 @@ contract IndexOracle is Ownable, IOracle {
     mapping(address => uint256) public updateTime;
     mapping(address => PoolFundingData) private poolData;     // Premium accumulator
 
-    event FundingRateCalculated(address indexed pool, int256 fundingRate, int256 avgVTWAPIndex, int256 interestRate);
-    event IndexPriceUpdated(address indexed pool, uint256 newPrice);
-    event VTWAPIndexSampled(address indexed pool, int256 VTWAPIndex, uint256 weight);
-    event SettlementPeriodUpdated(uint256 oldPeriod, uint256 newPeriod);
-
     error UnauthorizedPool();
 
     constructor() Ownable(msg.sender) {
@@ -161,9 +156,9 @@ contract IndexOracle is Ownable, IOracle {
         uint128 avgVT;
         uint128 avgVTOracle;
 
-        avgVT = getAvgVTWAPIndex(pool);
-        avgVTOracle = getAvgVTWAPOracle(pool);
-        avgVTWAPDiff = int128(avgVT - avgVTOracle) / int128(avgVTOracle);
+        avgVT = getVTWAPIndex(pool);
+        avgVTOracle = getVTWAPOracle(pool);
+        avgVTWAPDiff = int128(avgVT - avgVTOracle) * BASIS_POINT / int128(avgVTOracle);
 
         // Step 2: Calculate interest rate based on settlement period
         interestRate = calculateInterestRate();
@@ -219,7 +214,7 @@ contract IndexOracle is Ownable, IOracle {
      * @param pool The pool address
      * @return Average premium index in basis points
      */
-    function getAvgVTWAPIndex(address pool) public view returns (uint128) {
+    function getVTWAPIndex(address pool) public view returns (uint128) {
         PoolFundingData memory data = poolData[pool];
         if (data.cumWeight == 0) return 0;
         return data.cumWeightedPremium / data.cumWeight;
@@ -231,7 +226,7 @@ contract IndexOracle is Ownable, IOracle {
      * @param pool The pool address
      * @return Average premium index in basis points
      */
-    function getAvgVTWAPOracle(address pool) public view returns (uint128) {
+    function getVTWAPOracle(address pool) public view returns (uint128) {
         PoolFundingData memory data = poolData[pool];
         if (data.cumWeight == 0) return 0;
         return data.cumWeightedOracle / data.cumWeight;
@@ -249,7 +244,7 @@ contract IndexOracle is Ownable, IOracle {
         returns (uint64 sampleCount, uint128 avgVTWAPIndex)
     {
         PoolFundingData memory data = poolData[pool];
-        return (data.sampleCount, getAvgVTWAPIndex(pool));
+        return (data.sampleCount, getVTWAPIndex(pool));
     }
 
     /**

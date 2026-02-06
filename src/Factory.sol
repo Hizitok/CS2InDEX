@@ -6,435 +6,186 @@ import {Pool} from "./Pool.sol";
 import {Vault} from "./Vault.sol";
 import {positionNFT} from "./PositionNFT.sol";
 import {IndexOracle} from "./IndexOracle.sol";
-import {ADLEngine} from "./ADLEngine.sol";
+import {LiquidationEngine} from "./Liquidation.sol";
+import {IFactory} from "./interfaces/IFactory.sol";
 
 /**
  * @title CS2InDEX Factory
- * @notice Factory contract for deploying and managing CS2 item perpetual trading pools
- * @dev Handles deployment of Pool, Oracle, PositionNFT, and Engine contracts
+ * @notice Deploys and wires up all contracts for each trading pool:
+ *
+ *   Shared (one instance, deployed by constructor):
+ *     [Vault]        — central collateral vault
+ *     [IndexOracle]  — price oracle
+ *     [positionNFT]  — position NFTs
+ *
+ *   Per pool:
+ *     [Pool]              — orderbook + matching engine
+ *     [LiquidationEngine] — monitors margin, force-liquidates via Pool
+ *
+ *   Permission wiring on createPool:
+ *     Vault.setPool(pool)              → Pool can internalTransfer
+ *     positionNFT.setPool(pool)        → Pool can mint/update positions
+ *     IndexOracle.addPool(pool)        → Pool can submit VTWAP samples
+ *     Pool.setEngine(engine)           → Engine can forceLiquidate
  */
-contract CS2InDEXFactory is Ownable {
+contract CS2InDEXFactory is Ownable, IFactory {
 
-    // Protocol configuration
-    address public immutable vault;
-    address public liquidationEngine;
-    address public adlEngine;
-    address public insuranceFund;
+    error NotMyPool();
 
-    // Protocol fees
-    uint256 public protocolFeeRate = 1000; // 0.1% (1000 / 1000000)
-    uint256 public constant FEE_BASIS = 1000000;
+    address public vault;
+    address public oracle;
+    address public nft;
 
-    // Pool registry
-    struct PoolInfo {
-        address poolAddress;
-        address oracle;
-        address positionNFT;
-        string itemName;
-        uint256 deployedAt;
-        bool active;
-    }
-
-    // Item name => PoolInfo
-    mapping(string => PoolInfo) public pools;
-
-    // Array of all pool addresses
+    // pool address => PoolInfo
+    mapping(address => PoolInfo) internal _pools;
     address[] public allPools;
 
-    // Pool => is deployed by this factory
-    mapping(address => bool) public isFactoryPool;
+    constructor(address _supportedToken) Ownable(msg.sender) {
+        require(_supportedToken != address(0), "Invalid token");
 
-    // Events
-    event PoolCreated(
-        string indexed itemName,
-        address indexed pool,
-        address indexed oracle,
-        address positionNFT,
-        uint256 initialPrice
-    );
-
-    event PoolStatusChanged(
-        string indexed itemName,
-        address indexed pool,
-        bool active
-    );
-
-    event ProtocolFeeUpdated(
-        uint256 oldFee,
-        uint256 newFee
-    );
-
-    event LiquidationEngineUpdated(
-        address indexed oldEngine,
-        address indexed newEngine
-    );
-
-    event InsuranceFundUpdated(
-        address indexed oldFund,
-        address indexed newFund
-    );
-
-    constructor(
-        address _vault,
-        address _insuranceFund
-    ) Ownable() {
-        require(_vault != address(0), "Invalid vault");
-        require(_insuranceFund != address(0), "Invalid insurance fund");
-
-        vault = _vault;
-        insuranceFund = _insuranceFund;
+        // Deploy shared contracts
+        vault = address(new Vault(_supportedToken));
+        oracle = address(new IndexOracle());
+        nft = address(new positionNFT());
     }
 
-    /**
-     * @notice Initialize engines after factory deployment
-     * @dev Must be called after factory is deployed to set up engine contracts
-     * @param _liquidationEngine Liquidation engine address
-     * @param _adlEngine ADL engine address
-     */
-    function initializeEngines(
-        address _liquidationEngine,
-        address _adlEngine
-    ) external onlyOwner {
-        require(liquidationEngine == address(0), "Already initialized");
-        require(_liquidationEngine != address(0), "Invalid liquidation engine");
-        require(_adlEngine != address(0), "Invalid ADL engine");
-
-        liquidationEngine = _liquidationEngine;
-        adlEngine = _adlEngine;
-    }
+    // ======== Pool Deployment ======== //
 
     /**
-     * @notice Deploy a new perpetual trading pool for a CS2 item
-     * @param itemName Name of the CS2 item (e.g., "AK47-Redline")
-     * @param initialPriceX100 Initial price multiplied by 100
-     * @param curDecimal Token decimal (e.g., 6 for USDC)
-     * @return poolAddress Address of deployed pool
-     * @return oracleAddress Address of deployed oracle
-     * @return nftAddress Address of deployed position NFT
+     * @notice Deploy a full trading pool for a CS2 item
+     * @param itemName  e.g. "AK47-Redline"
+     * @param initialPrice  Initial price (scaled by pxDecimals)
+     * @param pxDecimals  Price decimal places (e.g. 2 means prices are x100)
      */
     function createPool(
         string memory itemName,
-        uint256 initialPriceX100,
-        uint256 curDecimal
+        uint256 initialPrice,
+        uint256 pxDecimals
     )
         external
         onlyOwner
-        returns (
-            address poolAddress,
-            address oracleAddress,
-            address nftAddress
-        )
+        returns (address poolAddr, address engineAddr)
     {
-        require(pools[itemName].poolAddress == address(0), "Pool already exists");
-        require(initialPriceX100 > 0, "Invalid initial price");
-        require(bytes(itemName).length > 0, "Empty item name");
+        require(initialPrice > 0, "Invalid price");
+        require(bytes(itemName).length > 0, "Empty name");
 
-        // Deploy Oracle
-        CS2IndexOracle oracle = new CS2IndexOracle(initialPriceX100);
-        oracleAddress = address(oracle);
-
-        // Deploy Position NFT
-        positionNFT nft = new positionNFT();
-        nftAddress = address(nft);
-
-        // Deploy Pool
+        // 1. Deploy Pool
         Pool pool = new Pool(
             vault,
-            nftAddress,
-            Vault(vault).supportedToken(),
-            oracleAddress,
-            curDecimal,
-            initialPriceX100
+            nft,
+            oracle,
+            pxDecimals,
+            initialPrice,
+            itemName
         );
-        poolAddress = address(pool);
+        poolAddr = address(pool);
+        require(_pools[poolAddr].pool == address(0), "Pool exists");
 
-        // Set up permissions
-        nft.setPool(poolAddress, true);
-        Vault(vault).setPool(poolAddress, true);
+        // 2. Deploy LiquidationEngine (one per pool)
+        LiquidationEngine engine = new LiquidationEngine(
+            poolAddr,
+            nft,
+            oracle,
+            pxDecimals
+        );
+        engineAddr = address(engine);
 
-        // Register with liquidation engine
-        if (liquidationEngine != address(0)) {
-            LiquidationEngine(liquidationEngine).setPoolOracle(poolAddress, oracleAddress);
-        }
+        // 3. Wire permissions
+        positionNFT(nft).setPool(poolAddr, true);
+        Vault(vault).setPool(poolAddr, true);
+        IndexOracle(oracle).addPool(poolAddr);
+        pool.setEngine(engineAddr);
 
-        // Store pool info
-        pools[itemName] = PoolInfo({
-            poolAddress: poolAddress,
-            oracle: oracleAddress,
-            positionNFT: nftAddress,
+        // 4. Store
+        _pools[poolAddr] = PoolInfo({
+            pool: poolAddr,
+            engine: engineAddr,
             itemName: itemName,
             deployedAt: block.timestamp,
             active: true
         });
 
-        allPools.push(poolAddress);
-        isFactoryPool[poolAddress] = true;
+        allPools.push(poolAddr);
 
-        emit PoolCreated(itemName, poolAddress, oracleAddress, nftAddress, initialPriceX100);
+        emit PoolCreated(poolAddr, engineAddr, itemName, initialPrice);
+    }
+
+    // ======== Admin ======== //
+
+    /**
+     * @notice Activate / deactivate a pool
+     */
+    function setPoolStatus(address pool, bool active) external onlyOwner {
+        if(_pools[pool].factory == address(this)) revert NotMyPool();
+        _pools[pool].active = active;
+        emit PoolStatusChanged(pool, active);
     }
 
     /**
-     * @notice Activate or deactivate a pool
-     * @param itemName Name of the CS2 item
-     * @param active Whether pool should be active
+     * @notice Update oracle price for a pool
+     * @dev Factory is oracle owner, so it relays price updates
      */
-    function setPoolStatus(string memory itemName, bool active) external onlyOwner {
-        PoolInfo storage poolInfo = pools[itemName];
-        require(poolInfo.poolAddress != address(0), "Pool does not exist");
-
-        poolInfo.active = active;
-
-        emit PoolStatusChanged(itemName, poolInfo.poolAddress, active);
+    function updatePrice(address pool, uint256 newPrice) external onlyOwner {
+        if(_pools[pool].factory == address(this)) revert NotMyPool();
+        IndexOracle(oracle).updateIndexPrice(pool, newPrice);
+        emit OraclePriceUpdated(pool, newPrice);
     }
 
     /**
-     * @notice Update protocol fee rate
-     * @param newFeeRate New fee rate (basis points out of 1000000)
+     * @notice Trigger funding rate settlement for a pool
      */
-    function setProtocolFeeRate(uint256 newFeeRate) external onlyOwner {
-        require(newFeeRate <= 10000, "Fee too high"); // Max 1%
-
-        uint256 oldFee = protocolFeeRate;
-        protocolFeeRate = newFeeRate;
-
-        emit ProtocolFeeUpdated(oldFee, newFeeRate);
+    function applyFundingRate(address pool) external onlyOwner {
+        if(_pools[pool].factory == address(this)) revert NotMyPool();
+        IndexOracle(oracle).applyFundingRate(pool);
     }
 
     /**
-     * @notice Update liquidation engine
-     * @param newEngine New liquidation engine address
+     * @notice Collect trading fees from a pool
      */
-    function setLiquidationEngine(address newEngine) external onlyOwner {
-        require(newEngine != address(0), "Invalid engine");
-
-        address oldEngine = liquidationEngine;
-        liquidationEngine = newEngine;
-
-        emit LiquidationEngineUpdated(oldEngine, newEngine);
+    function collectFees(address pool, address to) external onlyOwner {
+        if(_pools[pool].factory == address(this)) revert NotMyPool();
+        Pool(pool).collectFees(to);
     }
 
-    /**
-     * @notice Update insurance fund address
-     * @param newFund New insurance fund address
-     */
-    function setInsuranceFund(address newFund) external onlyOwner {
-        require(newFund != address(0), "Invalid fund");
+    // ======== View ======== //
 
-        address oldFund = insuranceFund;
-        insuranceFund = newFund;
-
-        emit InsuranceFundUpdated(oldFund, newFund);
+    function getPoolInfo(address pool) external view returns (PoolInfo memory) {
+        return _pools[pool];
     }
 
-    /**
-     * @notice Add price feeder to an oracle
-     * @param itemName Name of the CS2 item
-     * @param feeder Address to authorize as price feeder
-     */
-    function addPriceFeeder(string memory itemName, address feeder) external onlyOwner {
-        PoolInfo memory poolInfo = pools[itemName];
-        require(poolInfo.poolAddress != address(0), "Pool does not exist");
-        require(feeder != address(0), "Invalid feeder");
-
-        CS2IndexOracle(poolInfo.oracle).addPriceFeeder(feeder);
-    }
-
-    /**
-     * @notice Remove price feeder from an oracle
-     * @param itemName Name of the CS2 item
-     * @param feeder Address to remove authorization from
-     */
-    function removePriceFeeder(string memory itemName, address feeder) external onlyOwner {
-        PoolInfo memory poolInfo = pools[itemName];
-        require(poolInfo.poolAddress != address(0), "Pool does not exist");
-
-        CS2IndexOracle(poolInfo.oracle).removePriceFeeder(feeder);
-    }
-
-    /**
-     * @notice Batch deploy multiple pools
-     * @param itemNames Array of item names
-     * @param initialPrices Array of initial prices
-     * @param decimals Array of decimals
-     * @return poolAddresses Array of deployed pool addresses
-     */
-    function batchCreatePools(
-        string[] memory itemNames,
-        uint256[] memory initialPrices,
-        uint256[] memory decimals
-    ) external onlyOwner returns (address[] memory poolAddresses) {
-        require(
-            itemNames.length == initialPrices.length &&
-            itemNames.length == decimals.length,
-            "Array length mismatch"
-        );
-
-        poolAddresses = new address[](itemNames.length);
-
-        for (uint256 i = 0; i < itemNames.length; i++) {
-            (address poolAddr, , ) = this.createPool(
-                itemNames[i],
-                initialPrices[i],
-                decimals[i]
-            );
-            poolAddresses[i] = poolAddr;
-        }
-    }
-
-    // ======== View Functions ========
-
-    /**
-     * @notice Get pool information by item name
-     * @param itemName Name of the CS2 item
-     * @return Pool information
-     */
-    function getPoolInfo(string memory itemName) external view returns (PoolInfo memory) {
-        return pools[itemName];
-    }
-
-    /**
-     * @notice Get pool address by item name
-     * @param itemName Name of the CS2 item
-     * @return Pool address
-     */
-    function getPool(string memory itemName) external view returns (address) {
-        return pools[itemName].poolAddress;
-    }
-
-    /**
-     * @notice Get oracle address by item name
-     * @param itemName Name of the CS2 item
-     * @return Oracle address
-     */
-    function getOracle(string memory itemName) external view returns (address) {
-        return pools[itemName].oracle;
-    }
-
-    /**
-     * @notice Get position NFT address by item name
-     * @param itemName Name of the CS2 item
-     * @return Position NFT address
-     */
-    function getPositionNFT(string memory itemName) external view returns (address) {
-        return pools[itemName].positionNFT;
-    }
-
-    /**
-     * @notice Get total number of pools
-     * @return Number of pools
-     */
     function poolCount() external view returns (uint256) {
         return allPools.length;
     }
 
-    /**
-     * @notice Get all pool addresses
-     * @return Array of pool addresses
-     */
     function getAllPools() external view returns (address[] memory) {
         return allPools;
     }
 
-    /**
-     * @notice Get active pool addresses
-     * @return Array of active pool addresses
-     */
-    function getActivePools() external view returns (address[] memory) {
-        uint256 activeCount = 0;
-
-        // Count active pools
-        for (uint256 i = 0; i < allPools.length; i++) {
-            address poolAddr = allPools[i];
-            // Find pool info
-            for (uint256 j = 0; j < allPools.length; j++) {
-                if (allPools[j] == poolAddr) {
-                    // This is inefficient but works for small arrays
-                    // In production, maintain a separate array
-                    activeCount++;
-                    break;
-                }
-            }
-        }
-
-        address[] memory activePools = new address[](activeCount);
-        uint256 index = 0;
-
-        for (uint256 i = 0; i < allPools.length; i++) {
-            address poolAddr = allPools[i];
-            activePools[index] = poolAddr;
-            index++;
-        }
-
-        return activePools;
-    }
-
-    /**
-     * @notice Get factory configuration
-     * @return _vault Vault address
-     * @return _liquidationEngine Liquidation engine address
-     * @return _adlEngine ADL engine address
-     * @return _insuranceFund Insurance fund address
-     * @return _protocolFeeRate Protocol fee rate
-     */
-    function getFactoryConfig()
-        external
-        view
-        returns (
-            address _vault,
-            address _liquidationEngine,
-            address _adlEngine,
-            address _insuranceFund,
-            uint256 _protocolFeeRate
-        )
-    {
-        return (
-            vault,
-            liquidationEngine,
-            adlEngine,
-            insuranceFund,
-            protocolFeeRate
-        );
-    }
-
-    /**
-     * @notice Check if a pool is valid (deployed by this factory)
-     * @param pool Pool address
-     * @return Whether pool is valid
-     */
     function isValidPool(address pool) external view returns (bool) {
-        return isFactoryPool[pool];
+        return _pools[pool].pool != address(0);
     }
 
     /**
-     * @notice Get comprehensive pool statistics
-     * @param itemName Name of the CS2 item
-     * @return poolAddr Pool address
-     * @return oracleAddr Oracle address
-     * @return nftAddr Position NFT address
-     * @return isActive Whether pool is active
-     * @return lastPrice Last traded price
-     * @return oraclePrice Current oracle price
+     * @notice Get pool stats for frontend display
      */
-    function getPoolStats(string memory itemName)
+    function getPoolStats(address pool)
         external
         view
         returns (
-            address poolAddr,
-            address oracleAddr,
-            address nftAddr,
-            bool isActive,
+            address engineAddr,
+            string memory itemName,
+            bool active,
             uint256 lastPrice,
-            uint256 oraclePrice
+            uint256 oraclePrice_
         )
     {
-        PoolInfo memory poolInfo = pools[itemName];
-        require(poolInfo.poolAddress != address(0), "Pool does not exist");
+        PoolInfo memory info = _pools[pool];
+        if(info == address(this)) revert NotMyPool();
 
-        poolAddr = poolInfo.poolAddress;
-        oracleAddr = poolInfo.oracle;
-        nftAddr = poolInfo.positionNFT;
-        isActive = poolInfo.active;
-        lastPrice = Pool(poolAddr).getLastPrice();
-        oraclePrice = CS2IndexOracle(oracleAddr).priceX100();
+        engineAddr = info.engine;
+        itemName = info.itemName;
+        active = info.active;
+        lastPrice = Pool(info.pool).getLastPrice();
+        oraclePrice_ = IndexOracle(oracle).oraclePrice(info.pool);
     }
 }

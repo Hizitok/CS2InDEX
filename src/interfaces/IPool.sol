@@ -135,4 +135,18 @@ interface IPool is OrderTypes {
      */
     function getLastPrice() external view returns (uint256);
 
+    /**
+     * @notice Get liquidation engine address
+     * @return Engine address
+     */
+    function engine() external view returns (address);
+
+    /**
+     * @notice Force liquidate a position (engine only)
+     * @dev Skips auth/price checks; places limit order at bankruptcy price
+     * @param orderId Position ID to liquidate
+     * @param pOrder Closing order (Limit at bankruptcy price)
+     */
+    function forceLiquidate(OrderId orderId, PoolOrder memory pOrder) external;
+
 }

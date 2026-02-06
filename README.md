@@ -72,24 +72,33 @@ CS2InDEX is inspired by traditional cryptocurrency exchanges like Binance and OK
 └─────────────────────────────────────────────────────────┘
                            ↕
 ┌─────────────────────────────────────────────────────────┐
-│                  Oracle Service (Node.js)                │
-│                                                          │
-│  Fetches prices from:                                    │
+│                  Oracle Service (Node.js)               │
+│                                                         │
+│  Fetches prices from:                                   │
 │  • SkinFlow.gg (CS2 Global & Knives Indices)            │
 │  • EsportFire.com (Rifles & Gloves Indices)             │
-│  • Buff163 (Fallback)                                    │
-│                                                          │
-│  Updates on-chain oracles every 5 minutes                │
+│  • Buff163 (Fallback)                                   │
+│                                                         │
+│  Updates on-chain oracles every 5 minutes               │
 └─────────────────────────────────────────────────────────┘
                            ↕
 ┌─────────────────────────────────────────────────────────┐
-│              Frontend (Next.js + RainbowKit)             │
-│                                                          │
-│  • Wallet connection (MetaMask, WalletConnect, etc.)     │
-│  • Trading interface (Long/Short, Leverage)              │
-│  • Position management (Open, Close, Transfer)           │
-│  • Vault management (Deposit, Withdraw)                  │
-│  • Real-time market data                                 │
+│              Frontend (Next.js + RainbowKit)            │
+│                                                         │
+│  • Wallet connection (MetaMask, WalletConnect, etc.)    │
+│  • Trading interface (Long/Short, Leverage)             │
+│  • Position management (Open, Close, Transfer)          │
+│  • Vault management (Deposit, Withdraw)                 │
+│  • Real-time market data                                │
+└─────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────┐
+│              Market Maker                               │
+│                                                         │
+│  • Trading interface                                    │
+│  • Position management                                  │
+│  • Algorithm                                            │
+│  • Real-time market data                                │
 └─────────────────────────────────────────────────────────┘
 ```
 

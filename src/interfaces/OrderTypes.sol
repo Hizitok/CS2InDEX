@@ -15,7 +15,7 @@ interface OrderTypes {
         uint256 price;
     }
 
-    enum posStatus { none, pendingOpen, open, pendingClose, forceClose, closed, settled }
+    enum posStatus { none, pendingOpen, open, pendingClose, liquidating, closed, settled }
 
     struct Position {
 
