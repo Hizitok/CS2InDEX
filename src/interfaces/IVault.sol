@@ -23,6 +23,8 @@ interface IVault {
      */
     function withdraw(uint256 amount) external;
 
+    function withdrawTo(address to, uint256 amount) external;
+
     /**
      * @notice Get user's total balance in the vault
      * @param user User address

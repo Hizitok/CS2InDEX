@@ -120,7 +120,7 @@ contract Vault is Ownable, ReentrancyGuard {
         emit Deposited(msg.sender, supportedToken, amount);
     }
 
-    function internalWithdraw(address from, uint256 amount, uint256 to) 
+    function internalWithdraw(address from, address to, uint256 amount) 
         private 
     {
         if (amount == 0) revert ZeroAmount();
@@ -146,15 +146,15 @@ contract Vault is Ownable, ReentrancyGuard {
      * @param amount Amount to withdraw
      */
     function withdraw(uint256 amount) external nonReentrant {
-        internalWithdraw(msg.sender, amount, msg.sender);
+        internalWithdraw(msg.sender, msg.sender, amount);
 
     }
 
-    function withdrawTo(uint256 amount, address to)
+    function withdrawTo(address to, uint256 amount)
         external
         nonReentrant 
     {
-        internalWithdraw(msg.sender, amount, to);
+        internalWithdraw(msg.sender, to, amount);
     }
 
     /**

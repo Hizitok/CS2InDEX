@@ -135,6 +135,8 @@ interface IPool is OrderTypes {
      */
     function getLastPrice() external view returns (uint256);
 
+    function setEngine(address _engine) external;
+
     /**
      * @notice Get liquidation engine address
      * @return Engine address

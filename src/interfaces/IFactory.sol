@@ -9,11 +9,11 @@ pragma solidity ^0.8.20;
 interface IFactory {
 
     struct PoolInfo {
+        address factory;
         address pool;
         address engine;
-        string itemName;
         uint256 deployedAt;
-        bool active;
+        string itemName;
     }
 
     function createPool(
@@ -21,8 +21,6 @@ interface IFactory {
         uint256 initialPrice,
         uint256 pxDecimals
     ) external returns (address pool, address engine);
-
-    function setPoolStatus(address pool, bool active) external;
 
     function updatePrice(address pool, uint256 newPrice) external;
 

@@ -8,6 +8,8 @@ pragma solidity ^0.8.20;
  */
 interface IOracle {
 
+    function addPool(address pool) external;
+
     function oraclePrice(address pool) external view returns (uint256);
 
     function updateTime(address pool) external view returns (uint256);
@@ -17,7 +19,7 @@ interface IOracle {
      * @param newPrice New price multiplied by 100
      * @dev Only callable by authorized price feeders or owner
      */
-    function updateIndexPrice(uint256 newPrice) external;
+    function updateIndexPrice(address pool, uint256 newPrice) external;
 
     function updatePoolInfo(uint256 size, uint256 price) external;
 
