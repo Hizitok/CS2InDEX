@@ -14,7 +14,7 @@ import {IPool} from "./interfaces/IPool.sol";
  * @title CS2InDEX Factory
  * @notice Deploys and wires up all contracts for each trading pool:
  *
- *   Shared (one instance, deployed by administrator):
+ *   Shared (one instance, deployed by constructor):
  *     [Vault]        — central collateral vault
  *     [IndexOracle]  — price oracle
  *     [positionNFT]  — position NFTs

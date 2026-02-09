@@ -102,18 +102,16 @@ struct Node {
 **Order Statistics Tree节点**：
 ```solidity
 struct Node {
-    uint256 key;      // 32 bytes
-    uint256 value;    // 32 bytes
-    uint256 parent;   // 32 bytes
-    uint256 left;     // 32 bytes
-    uint256 right;    // 32 bytes
-    uint256 size;     // 32 bytes (替换isRed，用位操作同时存储)
-    bool isRed;       // 包含在size中
+    uint256 key;           // Slot 0: Key pointer (Position ID/OrderId) - must be uint256
+    uint128 parent;        // Slot 1 high: Parent node ID (max 2^128 nodes)
+    uint128 left;          // Slot 1 low: Left child node ID
+    uint128 right;         // Slot 2 high: Right child node ID
+    uint64 size;           // Slot 2 mid: Size of subtree (max 2^64 nodes)
+    bool isRed;            // Slot 2 low: Red-Black color (8 bits)
 }
-// Total: 6 slots = 192 bytes（相同！）
 ```
 
-**结论**: 存储成本完全相同，但功能强大得多！
+**结论**: 存储成本更小
 
 ## 🎯 核心优势
 
@@ -124,12 +122,13 @@ struct Node {
 // "您的仓位风险排名：58 / 2000（前3%）"
 ```
 
-### 2. 高效批量清算
+<!-- ### 2. 高效批量清算
 ```solidity
 // 一次清算最危险的10个仓位
 uint256 liquidated = liquidationEngine.batchLiquidate(pool, 10);
 // Gas: 400k (vs 5M with linear scan)
-```
+``` 
+-->
 
 ### 3. 清算深度分析
 ```solidity

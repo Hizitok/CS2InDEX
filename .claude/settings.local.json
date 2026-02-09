@@ -5,7 +5,8 @@
       "Bash(forge test:*)",
       "Bash(wsl -e sh:*)",
       "Bash(wsl echo $PATH)",
-      "Bash(wsl ls:*)"
+      "Bash(wsl ls:*)",
+      "Bash(forge install:*)"
     ]
   }
 }

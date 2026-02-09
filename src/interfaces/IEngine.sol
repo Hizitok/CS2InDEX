@@ -23,7 +23,7 @@ interface IEngine is OrderTypes {
     function isLiquidatable(OrderId oId) external view returns (bool);
 
     // Events
-    event PositionRegistered(OrderId indexed oID, uint256 triggerPx, bool isShort);
+    event PositionRegistered(OrderId indexed oID, int256 triggerPx, bool isShort);
     event PositionLiquidated(OrderId indexed oID, address indexed liquidator, uint256 markPrice, uint256 bankruptPx);
-    event TriggerPxUpdated(OrderId indexed oID, uint256 oldPx, uint256 newPx);
+    event TriggerPxUpdated(OrderId indexed oID, int256 oldPx, int256 newPx);
 }

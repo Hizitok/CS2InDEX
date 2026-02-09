@@ -1,1 +1,12 @@
+# Foundry Outputs
+out/
+
+# test scripts
+*.sh
+
+# Compilation docs
 */artifacts
+
+*/.deps
+# Claude 
+*/.claude

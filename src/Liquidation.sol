@@ -19,9 +19,39 @@ import {IOracle} from "./interfaces/IOracle.sol";
  *   If orderbook price is better than bankruptcy price → immediate fill
  *   Otherwise the order stays in the book waiting to be matched
  *
- * Queue ordering (both sorted ascending by triggerPx):
- *   Long queue:  getMax = most at risk, liquidate when markPrice <= triggerPx
- *   Short queue: getMin = most at risk, liquidate when markPrice >= triggerPx
+ * ── Price Derivation ──
+ *
+ *   Definitions (pre-multiplied values, matching Position struct):
+ *     openAmount     = \Sigma(fillPrice × fillSize)            total cost basis
+ *     openFundingIdx = \Sigma(fillSize × fundingIdx_at_fill)   cumulative funding
+ *     openSize       = \Sigma(fillSize)                        total position size
+ *     fundingIdx     = current global funding index
+ *     decFactor      = 10^pxDecimals
+ *
+ *   PnL at closing price P (from Pool settlement):
+ *     Long:  PnL = P × openSize - openAmount + openFundingIdx - openSize × fundingIdx
+ *     Short: PnL = openAmount - P × openSize - openFundingIdx + openSize × fundingIdx
+ *
+ *   Setting PnL = -maxLoss × decFactor and solving for P:
+ *     Let f(dct): f(short) = +1, f(long) = -1
+ *
+ *     P = (openAmount - openFundingIdx + f(dct) × maxLoss × decFactor) / openSize + fundingIdx
+ *                       +─────────────── relativePx ───────────────+
+ *
+ *   Key insight: fundingIdx is identical across all positions, so relativePx
+ *   alone determines liquidation ordering. We store relativePx in the tree
+ *   and only add fundingIdx when comparing against markPrice.
+ *
+ *   Trigger price:    maxLoss = openMargin × 80%   → remaining margin = 20%
+ *   Bankruptcy price: maxLoss = openMargin × 100%  → remaining margin = 0%
+ *
+ * ── Queue Ordering ──
+ *
+ *   Both queues sorted ascending by relativePx (actualPx = relativePx + fundingIdx):
+ *     Long:  getMax = highest relativePx = most at risk
+ *            liquidate while markPrice <= actualTriggerPx
+ *     Short: getMin = lowest relativePx  = most at risk
+ *            liquidate while markPrice >= actualTriggerPx
  */
 contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
 
@@ -39,7 +69,7 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
     uint256 public pxDecimals;
 
     // Trigger price: the price at which remaining margin = 20% of openMargin
-    mapping(OrderId => uint256) public triggerPx;
+    mapping(OrderId => int256) public triggerPx;
     // Track position direction in the queue
     mapping(OrderId => bool) internal isShortPos;
 
@@ -88,7 +118,7 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         Position memory pos = IPosition(positionNFT).getPosition(oID);
         require(pos.openSize > 0, "No open size");
 
-        uint256 tPx = _calcTriggerPx(pos);
+        int256 tPx = _calcTriggerPx(pos);
         triggerPx[oID] = tPx;
         isShortPos[oID] = pos.isShort;
 
@@ -123,17 +153,16 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         uint256 rawId = OrderId.unwrap(oID);
         bool isShort = isShortPos[oID];
 
-        // Remove from current position in tree
-        _removeFromQueue(oID);
-
         // Re-evaluate
         Position memory pos = IPosition(positionNFT).getPosition(oID);
         if (pos.status != posStatus.open || pos.openSize == 0) {
             return; // position no longer open, don't re-insert
         }
 
-        uint256 oldPx = triggerPx[oID];
-        uint256 newPx = _calcTriggerPx(pos);
+        int256 oldPx = triggerPx[oID];
+        // Remove from current position in tree
+        _removeFromQueue(oID);
+        int256 newPx = _calcTriggerPx(pos);
         triggerPx[oID] = newPx;
         isShortPos[oID] = isShort;
 
@@ -160,15 +189,15 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
      */
     function liquidate() external {
         uint256 markPrice = IOracle(oracle).oraclePrice(pool);
-
+        uint256 fundingIdx = IPool(pool).fundingIdx();
         // --- Long positions ---
         while (!isEmpty(longQueue)) {
             uint256 maxKey = getMax(longQueue);
             OrderId oID = OrderId.wrap(maxKey);
 
-            if (triggerPx[oID] < markPrice) break;
+            if (triggerPx[oID] + int256(fundingIdx) < int256(markPrice)) break;
 
-            _executeLiquidation(oID, markPrice);
+            _executeLiquidation(oID, markPrice, fundingIdx);
         }
 
         // --- Short positions ---
@@ -176,9 +205,9 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
             uint256 minKey = getMin(shortQueue);
             OrderId oID = OrderId.wrap(minKey);
 
-            if (triggerPx[oID] > markPrice) break;
+            if (triggerPx[oID] + int256(fundingIdx) > int256(markPrice)) break;
 
-            _executeLiquidation(oID, markPrice);
+            _executeLiquidation(oID, markPrice, fundingIdx);
         }
     }
 
@@ -189,7 +218,7 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         view
         returns (uint256)
     {
-        return triggerPx[oId];
+        return uint256( triggerPx[oId] + int256(IPool(pool).fundingIdx()) );
     }
 
     /**
@@ -200,8 +229,8 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         view
         returns (bool)
     {
-        uint256 tPx = triggerPx[oId];
-        if (tPx == 0) return false;
+        if (triggerPx[oId] == 0) return false;
+        uint256 tPx = uint256( triggerPx[oId] + int256(IPool(pool).fundingIdx()) );
 
         uint256 markPrice = IOracle(oracle).oraclePrice(pool);
 
@@ -230,7 +259,7 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
      *   3. Build a Limit closing order at bankruptcy price
      *   4. Call Pool.forceLiquidate → order enters the orderbook
      */
-    function _executeLiquidation(OrderId oID, uint256 markPrice) internal {
+    function _executeLiquidation(OrderId oID, uint256 markPrice, uint256 fundingIdx) internal {
         uint256 rawId = OrderId.unwrap(oID);
         bool isShort = isShortPos[oID];
 
@@ -243,7 +272,7 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
 
         // 2. Get position and compute bankruptcy price
         Position memory pos = IPosition(positionNFT).getPosition(oID);
-        uint256 bankruptPx = _calcBankruptPx(pos);
+        uint256 bankruptPx = uint256( _calcBankruptPx(pos) + int256(fundingIdx) );
 
         // 3. Build closing limit order at bankruptcy price
         //    Long closes with sell, short closes with buy
@@ -265,49 +294,40 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
     }
 
     /**
-     * @dev Unified price calculation helper
+     * @dev Compute relativePx — the liquidation price before adding fundingIdx.
      *
-     *   base = openAmount - fundingDelta
-     *     where fundingDelta = openFundingIdx - openSize * currentFundingIdx
+     *   relativePx = (openAmount - openFundingIdx + f(dct) × maxLoss × decFactor) / openSize
      *
-     *   Long:  price = (base - maxLoss * decFactor) / openSize
-     *   Short: price = (base + maxLoss * decFactor) / openSize
+     *   Actual price = relativePx + fundingIdx (applied at comparison / execution time)
      */
-    function _calcPriceAtLoss(Position memory pos, uint256 maxLoss) internal view returns (uint256) {
-        uint256 currentFundingIdx = IPool(pool).fundingIdx();
+    function _calcRelativePxAtLoss(Position memory pos, uint256 maxLoss) 
+        internal 
+        view 
+        returns (int256) 
+    {
         uint256 decFactor = 10 ** pxDecimals;
 
-        int256 fundingDelta = int256(pos.openFundingIdx)
-                            - int256(pos.openSize * currentFundingIdx);
+        int256 base = int256(pos.openAmount) - int256(pos.openFundingIdx);
 
-        int256 base = int256(pos.openAmount) - fundingDelta;
-
-        int256 numerator;
-        if (pos.isShort) {
-            numerator = base + int256(maxLoss * decFactor);
-        } else {
-            numerator = base - int256(maxLoss * decFactor);
-        }
-
-        if (numerator <= 0) return 0;
-        return uint256(numerator) / pos.openSize;
+        int256 numerator = base + int256(pos.isShort?int256(1):-1) * int256(maxLoss * decFactor);
+        return numerator / int256(pos.openSize);
     }
 
     /**
      * @dev Trigger price: where remaining margin = 20% of openMargin
      *      maxLoss = openMargin * 80%
      */
-    function _calcTriggerPx(Position memory pos) internal view returns (uint256) {
+    function _calcTriggerPx(Position memory pos) internal view returns (int256) {
         uint256 maxLoss = pos.openMargin * (RATE_BASIS - MAINTENANCE_RATE) / RATE_BASIS;
-        return _calcPriceAtLoss(pos, maxLoss);
+        return _calcRelativePxAtLoss(pos, maxLoss);
     }
 
     /**
      * @dev Bankruptcy price: where remaining margin = 0
      *      maxLoss = openMargin * 100%
      */
-    function _calcBankruptPx(Position memory pos) internal view returns (uint256) {
-        return _calcPriceAtLoss(pos, pos.openMargin);
+    function _calcBankruptPx(Position memory pos) internal view returns (int256) {
+        return _calcRelativePxAtLoss(pos, pos.openMargin);
     }
 
     function _removeFromQueue(OrderId oID) internal {

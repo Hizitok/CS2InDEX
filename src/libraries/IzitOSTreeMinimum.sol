@@ -22,24 +22,29 @@ abstract contract IzitOSTreeMinimum {
     bool private constant BLACK = false;
 
     struct Node {
-        uint256 key;           // Key pointer: Position ID (OrderId)
-        uint256 parent;
-        uint256 left;
-        uint256 right;
-        uint256 size;          // Size of subtree rooted at this node
-        bool isRed;
+        uint256 key;           // Slot 0: Key pointer (Position ID/OrderId) - must be uint256
+        uint128 parent;        // Slot 1 high: Parent node ID (max 2^128 nodes)
+        uint128 left;          // Slot 1 low: Left child node ID
+        uint128 right;         // Slot 2 high: Right child node ID
+        uint64 size;           // Slot 2 mid: Size of subtree (max 2^64 nodes)
+        bool isRed;            // Slot 2 low: Red-Black color (8 bits)
     }
+    // Storage: 3 slots (was 6) = 50% reduction!
 
     struct Tree {
-        uint256 root;
-        uint256 nodeCount;
+        uint128 root;          // Root node ID
+        uint128 nodeCount;     // Total nodes created
         mapping(uint256 => Node) nodes;
         mapping(uint256 => uint256) keyToNodeId;  // key => nodeId
     }
+    // Note: root and nodeCount are packed into 1 slot
 
     // Events for debugging
     event NodeInserted(uint256 key, uint256 nodeId);
     event NodeRemoved(uint256 key, uint256 nodeId);
+
+    error KeyNotFound();
+    error EmptyTree();
 
     /*//////////////////////////////////////////////////////////////
                             CORE OPERATIONS
@@ -59,12 +64,12 @@ abstract contract IzitOSTreeMinimum {
         require(key != 0, "Key cannot be 0");
         require(!contains(tree, key), "Key already exists");
 
-        uint256 nodeId = ++tree.nodeCount;
+        uint128 nodeId = ++tree.nodeCount;
         tree.keyToNodeId[key] = nodeId;
 
         // Standard BST insert
-        uint256 parent = NIL;
-        uint256 current = tree.root;
+        uint128 parent = uint128(NIL);
+        uint128 current = tree.root;
 
         while (current != NIL) {
             parent = current;
@@ -81,8 +86,8 @@ abstract contract IzitOSTreeMinimum {
         tree.nodes[nodeId] = Node({
             key: key,
             parent: parent,
-            left: NIL,
-            right: NIL,
+            left: uint128(NIL),
+            right: uint128(NIL),
             size: 1,
             isRed: true  // New nodes are red
         });
@@ -107,13 +112,13 @@ abstract contract IzitOSTreeMinimum {
      * @param key The key to remove
      */
     function remove(Tree storage tree, uint256 key) internal {
-        require(contains(tree, key), "Key not found");
+        if(!contains(tree, key)) revert KeyNotFound();
 
-        uint256 nodeId = tree.keyToNodeId[key];
+        uint128 nodeId = uint128(tree.keyToNodeId[key]);
         delete tree.keyToNodeId[key];
 
-        uint256 toDelete = nodeId;
-        uint256 replacement;
+        uint128 toDelete = nodeId;
+        uint128 replacement;
         bool originalColor = tree.nodes[toDelete].isRed;
 
         if (tree.nodes[nodeId].left == NIL) {
@@ -133,6 +138,13 @@ abstract contract IzitOSTreeMinimum {
                     tree.nodes[replacement].parent = toDelete;
                 }
             } else {
+                // Decrement sizes along path from toDelete to nodeId before moving toDelete
+                uint128 temp = tree.nodes[toDelete].parent;
+                while (temp != nodeId) {
+                    tree.nodes[temp].size--;
+                    temp = tree.nodes[temp].parent;
+                }
+
                 transplant(tree, toDelete, tree.nodes[toDelete].right);
                 tree.nodes[toDelete].right = tree.nodes[nodeId].right;
                 tree.nodes[tree.nodes[toDelete].right].parent = toDelete;
@@ -142,11 +154,11 @@ abstract contract IzitOSTreeMinimum {
             tree.nodes[toDelete].left = tree.nodes[nodeId].left;
             tree.nodes[tree.nodes[toDelete].left].parent = toDelete;
             tree.nodes[toDelete].isRed = tree.nodes[nodeId].isRed;
-            tree.nodes[toDelete].size = tree.nodes[nodeId].size;
+            // Don't copy size - let updateSize recalculate it correctly
         }
 
-        // Update sizes along the path
-        uint256 current = tree.nodes[toDelete].parent;
+        // Update sizes along the path, starting from toDelete itself
+        uint128 current = toDelete;
         while (current != NIL) {
             updateSize(tree, current);
             current = tree.nodes[current].parent;
@@ -171,14 +183,14 @@ abstract contract IzitOSTreeMinimum {
      * @return rank The rank (1 = smallest, 2 = second smallest, etc.)
      */
     function getRank(Tree storage tree, uint256 key) internal view returns (uint256 rank) {
-        require(contains(tree, key), "Key not found");
+        if(!contains(tree, key)) revert KeyNotFound();
 
-        uint256 nodeId = tree.keyToNodeId[key];
+        uint128 nodeId = uint128(tree.keyToNodeId[key]);
         rank = getSize(tree, tree.nodes[nodeId].left) + 1;
 
-        uint256 current = nodeId;
+        uint128 current = nodeId;
         while (current != tree.root) {
-            uint256 parent = tree.nodes[current].parent;
+            uint128 parent = tree.nodes[current].parent;
             if (current == tree.nodes[parent].right) {
                 rank += getSize(tree, tree.nodes[parent].left) + 1;
             }
@@ -201,8 +213,8 @@ abstract contract IzitOSTreeMinimum {
      * @notice Get minimum key in tree
      */
     function getMin(Tree storage tree) internal view returns (uint256 key) {
-        require(tree.root != NIL, "Tree is empty");
-        uint256 nodeId = minimum(tree, tree.root);
+        if(tree.root == NIL) revert EmptyTree();
+        uint128 nodeId = minimum(tree, tree.root);
         key = tree.nodes[nodeId].key;
     }
 
@@ -210,8 +222,8 @@ abstract contract IzitOSTreeMinimum {
      * @notice Get maximum key in tree
      */
     function getMax(Tree storage tree) internal view returns (uint256 key) {
-        require(tree.root != NIL, "Tree is empty");
-        uint256 nodeId = maximum(tree, tree.root);
+        if(tree.root == NIL) revert EmptyTree();
+        uint128 nodeId = maximum(tree, tree.root);
         key = tree.nodes[nodeId].key;
     }
 
@@ -226,26 +238,26 @@ abstract contract IzitOSTreeMinimum {
                         INTERNAL HELPER FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
-    function getSize(Tree storage tree, uint256 nodeId) private view returns (uint256) {
+    function getSize(Tree storage tree, uint128 nodeId) private view returns (uint64) {
         return nodeId == NIL ? 0 : tree.nodes[nodeId].size;
     }
 
-    function updateSize(Tree storage tree, uint256 nodeId) private {
+    function updateSize(Tree storage tree, uint128 nodeId) private {
         if (nodeId != NIL) {
-            tree.nodes[nodeId].size = 1 +
-                getSize(tree, tree.nodes[nodeId].left) +
-                getSize(tree, tree.nodes[nodeId].right);
+            tree.nodes[nodeId].size = uint64(1 +
+                uint256(getSize(tree, tree.nodes[nodeId].left)) +
+                uint256(getSize(tree, tree.nodes[nodeId].right)));
         }
     }
 
-    function minimum(Tree storage tree, uint256 nodeId) private view returns (uint256) {
+    function minimum(Tree storage tree, uint128 nodeId) private view returns (uint128) {
         while (tree.nodes[nodeId].left != NIL) {
             nodeId = tree.nodes[nodeId].left;
         }
         return nodeId;
     }
 
-    function maximum(Tree storage tree, uint256 nodeId) private view returns (uint256) {
+    function maximum(Tree storage tree, uint128 nodeId) private view returns (uint128) {
         while (tree.nodes[nodeId].right != NIL) {
             nodeId = tree.nodes[nodeId].right;
         }
@@ -256,8 +268,8 @@ abstract contract IzitOSTreeMinimum {
                         RED-BLACK TREE MAINTENANCE
     //////////////////////////////////////////////////////////////*/
 
-    function rotateLeft(Tree storage tree, uint256 nodeId) private {
-        uint256 right = tree.nodes[nodeId].right;
+    function rotateLeft(Tree storage tree, uint128 nodeId) private {
+        uint128 right = tree.nodes[nodeId].right;
 
         tree.nodes[nodeId].right = tree.nodes[right].left;
         if (tree.nodes[right].left != NIL) {
@@ -281,8 +293,8 @@ abstract contract IzitOSTreeMinimum {
         updateSize(tree, right);
     }
 
-    function rotateRight(Tree storage tree, uint256 nodeId) private {
-        uint256 left = tree.nodes[nodeId].left;
+    function rotateRight(Tree storage tree, uint128 nodeId) private {
+        uint128 left = tree.nodes[nodeId].left;
 
         tree.nodes[nodeId].left = tree.nodes[left].right;
         if (tree.nodes[left].right != NIL) {
@@ -306,13 +318,13 @@ abstract contract IzitOSTreeMinimum {
         updateSize(tree, left);
     }
 
-    function insertFixup(Tree storage tree, uint256 nodeId) private {
+    function insertFixup(Tree storage tree, uint128 nodeId) private {
         while (tree.nodes[tree.nodes[nodeId].parent].isRed) {
-            uint256 parent = tree.nodes[nodeId].parent;
-            uint256 grandparent = tree.nodes[parent].parent;
+            uint128 parent = tree.nodes[nodeId].parent;
+            uint128 grandparent = tree.nodes[parent].parent;
 
             if (parent == tree.nodes[grandparent].left) {
-                uint256 uncle = tree.nodes[grandparent].right;
+                uint128 uncle = tree.nodes[grandparent].right;
 
                 if (uncle != NIL && tree.nodes[uncle].isRed) {
                     // Case 1: Uncle is red
@@ -334,7 +346,7 @@ abstract contract IzitOSTreeMinimum {
                     rotateRight(tree, grandparent);
                 }
             } else {
-                uint256 uncle = tree.nodes[grandparent].left;
+                uint128 uncle = tree.nodes[grandparent].left;
 
                 if (uncle != NIL && tree.nodes[uncle].isRed) {
                     tree.nodes[parent].isRed = BLACK;
@@ -357,12 +369,12 @@ abstract contract IzitOSTreeMinimum {
         tree.nodes[tree.root].isRed = BLACK;
     }
 
-    function deleteFixup(Tree storage tree, uint256 nodeId) private {
+    function deleteFixup(Tree storage tree, uint128 nodeId) private {
         while (nodeId != tree.root && !tree.nodes[nodeId].isRed) {
-            uint256 parent = tree.nodes[nodeId].parent;
+            uint128 parent = tree.nodes[nodeId].parent;
 
             if (nodeId == tree.nodes[parent].left) {
-                uint256 sibling = tree.nodes[parent].right;
+                uint128 sibling = tree.nodes[parent].right;
 
                 if (tree.nodes[sibling].isRed) {
                     tree.nodes[sibling].isRed = BLACK;
@@ -389,7 +401,7 @@ abstract contract IzitOSTreeMinimum {
                     nodeId = tree.root;
                 }
             } else {
-                uint256 sibling = tree.nodes[parent].left;
+                uint128 sibling = tree.nodes[parent].left;
 
                 if (tree.nodes[sibling].isRed) {
                     tree.nodes[sibling].isRed = BLACK;
@@ -420,7 +432,7 @@ abstract contract IzitOSTreeMinimum {
         tree.nodes[nodeId].isRed = BLACK;
     }
 
-    function transplant(Tree storage tree, uint256 target, uint256 replacement) private {
+    function transplant(Tree storage tree, uint128 target, uint128 replacement) private {
         if (tree.nodes[target].parent == NIL) {
             tree.root = replacement;
         } else if (target == tree.nodes[tree.nodes[target].parent].left) {
