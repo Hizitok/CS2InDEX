@@ -86,13 +86,15 @@ contract OrderStatisticsTreeTest is Test, IzitOSTreeMinimum {
     }
 
     function testGetMinRevertEmptyTree() public {
-        vm.expectRevert("Tree is empty");
-        getMin(tree);
+        // getMin now returns 0 for empty tree instead of reverting
+        uint256 minKey = getMin(tree);
+        assertEq(minKey, 0, "Empty tree should return 0");
     }
 
     function testGetMaxRevertEmptyTree() public {
-        vm.expectRevert("Tree is empty");
-        getMax(tree);
+        // getMax now returns 0 for empty tree instead of reverting
+        uint256 maxKey = getMax(tree);
+        assertEq(maxKey, 0, "Empty tree should return 0");
     }
 
     /*//////////////////////////////////////////////////////////////

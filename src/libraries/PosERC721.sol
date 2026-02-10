@@ -12,11 +12,11 @@ contract PosERC721 is Ownable, IERC721 {
     error InvalidSender(address sender);
     error NonexistentToken(uint256 tokenId);
 
-    mapping(uint256 tokenId => address) private _owners;
+    mapping(uint256 tokenId => address) internal _owners;
 
-    mapping(address owner => uint256) private _balances;
+    mapping(address owner => uint256) internal _balances;
 
-    mapping(uint256 tokenId => address) private _tokenApprovals;
+    mapping(uint256 tokenId => address) internal _tokenApprovals;
 
     mapping(address owner => mapping(address operator => bool)) private _operatorApprovals;
 

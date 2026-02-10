@@ -211,18 +211,20 @@ abstract contract IzitOSTreeMinimum {
 
     /**
      * @notice Get minimum key in tree
+     * @return key The minimum key, or 0 if tree is empty
      */
     function getMin(Tree storage tree) internal view returns (uint256 key) {
-        if(tree.root == NIL) revert EmptyTree();
+        if(tree.root == NIL) return 0;
         uint128 nodeId = minimum(tree, tree.root);
         key = tree.nodes[nodeId].key;
     }
 
     /**
      * @notice Get maximum key in tree
+     * @return key The maximum key, or 0 if tree is empty
      */
     function getMax(Tree storage tree) internal view returns (uint256 key) {
-        if(tree.root == NIL) revert EmptyTree();
+        if(tree.root == NIL) return 0;
         uint128 nodeId = maximum(tree, tree.root);
         key = tree.nodes[nodeId].key;
     }

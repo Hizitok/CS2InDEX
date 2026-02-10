@@ -13,7 +13,7 @@ import { useAccount, useReadContract, useWriteContract, useWaitForTransactionRec
 import { formatUnits, parseUnits } from 'viem';
 import { VAULT_ABI, ERC20_ABI, CONTRACTS } from '@/config/contracts';
 import toast from 'react-hot-toast';
-import { Wallet, ArrowDownToLine, ArrowUpFromLine, Lock, Unlock } from 'lucide-react';
+import { Wallet, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -38,7 +38,7 @@ export function VaultBalance() {
 
   // --- 合约读取 Hooks ---
 
-  // 1. 获取 Vault 总权益 (Total Balance in Vault)
+  // 1. 获取 Vault 余额 (balanceOf is the only balance function in Vault)
   const { data: vaultBalance } = useReadContract({
     address: CONTRACTS.VAULT,
     abi: VAULT_ABI,
@@ -47,16 +47,7 @@ export function VaultBalance() {
     ...readConfig
   });
 
-  // 2. 获取可用余额 (Available to Withdraw)
-  const { data: availableBalance } = useReadContract({
-    address: CONTRACTS.VAULT,
-    abi: VAULT_ABI,
-    functionName: 'availableBalance',
-    args: address ? [address] : undefined,
-    ...readConfig
-  });
-
-  // 3. 获取钱包 USDC 余额
+  // 2. 获取钱包 USDC 余额
   const { data: usdcBalance } = useReadContract({
     address: CONTRACTS.USDC,
     abi: ERC20_ABI,
@@ -151,13 +142,7 @@ export function VaultBalance() {
 
   // 格式化数值展示
   const formattedVaultBalance = vaultBalance ? formatUnits(vaultBalance as bigint, 6) : '0';
-  const formattedAvailableBalance = availableBalance ? formatUnits(availableBalance as bigint, 6) : '0';
   const formattedUsdcBalance = usdcBalance ? formatUnits(usdcBalance as bigint, 6) : '0';
-
-  // 计算锁定金额 (用于保证金的部分)
-  const lockedBalance = vaultBalance && availableBalance
-    ? formatUnits((vaultBalance as bigint) - (availableBalance as bigint), 6)
-    : '0';
 
   if (!address) return null;
 
@@ -174,25 +159,6 @@ export function VaultBalance() {
           <div className="text-sm text-gray-400 mb-1">{t.vault.total}</div>
           <div className="text-3xl font-bold text-white tracking-tight">
             ${formattedVaultBalance} <span className="text-sm font-normal text-gray-500">USDC</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-gray-700/30 rounded-xl p-3 border border-gray-700/50">
-            <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-              <Unlock size={12} /> {t.vault.available}
-            </div>
-            <div className="text-lg font-semibold text-green-400">
-              ${formattedAvailableBalance}
-            </div>
-          </div>
-          <div className="bg-gray-700/30 rounded-xl p-3 border border-gray-700/50">
-            <div className="flex items-center gap-2 text-xs text-gray-400 mb-1">
-              <Lock size={12} /> {t.vault.locked}
-            </div>
-            <div className="text-lg font-semibold text-orange-400">
-              ${lockedBalance}
-            </div>
           </div>
         </div>
 
@@ -239,7 +205,7 @@ export function VaultBalance() {
           />
           <button
             onClick={() => setAmount(
-              mode === 'deposit' ? formattedUsdcBalance : formattedAvailableBalance
+              mode === 'deposit' ? formattedUsdcBalance : formattedVaultBalance
             )}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-secondary-500 hover:text-secondary-400 px-2 py-1 rounded hover:bg-secondary-500/10 transition-colors"
           >

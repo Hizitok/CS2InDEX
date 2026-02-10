@@ -10,7 +10,7 @@
 
 import { useReadContract } from 'wagmi';
 import { formatUnits } from 'viem';
-import { POOL_ABI, INDEX_ORACLE_ABI } from '@/config/contracts';
+import { POOL_ABI, INDEX_ORACLE_ABI, PX_DECIMALS } from '@/config/contracts';
 import { TrendingUp, Activity, AlertCircle, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -72,17 +72,17 @@ function MarketCard({ name, address }: { name: string; address: `0x${string}` })
   const askMinBigInt = poolInfo?.[1]; // ask1Price (Sell)
   const bidMaxBigInt = poolInfo?.[2]; // bid1Price (Buy)
 
-  const lastPrice = lastPriceBigInt ? parseFloat(formatUnits(lastPriceBigInt, 18)) : 0;
-  const oraclePrice = oraclePriceBigInt ? parseFloat(formatUnits(oraclePriceBigInt, 18)) : 0;
+  const lastPrice = lastPriceBigInt ? parseFloat(formatUnits(lastPriceBigInt, PX_DECIMALS)) : 0;
+  const oraclePrice = oraclePriceBigInt ? parseFloat(formatUnits(oraclePriceBigInt, PX_DECIMALS)) : 0;
 
-  // Funding Rate is in basis points (1 bp = 0.01%)
-  // fundingData = [rate, avgPremium, interest]
-  const fundingRateBp = fundingData ? Number(fundingData[0]) : 0;
+  // Funding Rate: calculateFundingRate returns (avgVTWAPDiff, interestRate, fundingRate)
+  // fundingRate is at index [2], in basis points (1 bp = 0.01%)
+  const fundingRateBp = fundingData ? Number(fundingData[2]) : 0;
   const fundingRatePercent = fundingRateBp / 100; // e.g. 200 => 2.00%
 
   // Spread Calculation
-  const askMin = askMinBigInt ? parseFloat(formatUnits(askMinBigInt, 18)) : 0;
-  const bidMax = bidMaxBigInt ? parseFloat(formatUnits(bidMaxBigInt, 18)) : 0;
+  const askMin = askMinBigInt ? parseFloat(formatUnits(askMinBigInt, PX_DECIMALS)) : 0;
+  const bidMax = bidMaxBigInt ? parseFloat(formatUnits(bidMaxBigInt, PX_DECIMALS)) : 0;
   const spread = (askMin > 0 && bidMax > 0)
     ? ((askMin - bidMax) / askMin * 100).toFixed(2)
     : '0.00';

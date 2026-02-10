@@ -54,7 +54,7 @@ contract CS2InDEXFactory is Ownable, IFactory {
     }
 
     modifier isMyPool(address pool) {
-        if(_pools[pool].factory == address(this)) revert NotMyPool();
+        if(_pools[pool].factory != address(this)) revert NotMyPool();
         _;
     }
 
@@ -153,6 +153,7 @@ contract CS2InDEXFactory is Ownable, IFactory {
     function getPoolStats(address pool)
         external
         view
+        isMyPool(pool)
         returns (
             PoolInfo memory info,
             uint256 lastPrice,
@@ -160,8 +161,6 @@ contract CS2InDEXFactory is Ownable, IFactory {
         )
     {
         info = _pools[pool];
-        if(info.factory == address(this)) revert NotMyPool();
-
         lastPrice = IPool(info.pool).getLastPrice();
         oraclePrice_ = IOracle(oracle).oraclePrice(info.pool);
     }

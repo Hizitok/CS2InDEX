@@ -76,6 +76,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
     Tree internal longQueue;
     Tree internal shortQueue;
 
+    // Active position counts (tree.nodeCount only increments, so track separately)
+    uint256 public longActiveCount;
+    uint256 public shortActiveCount;
+
     modifier onlyPool() {
         if(msg.sender != pool) revert InvalidPool();
         _;
@@ -124,8 +128,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
 
         if (pos.isShort) {
             insert(shortQueue, OrderId.unwrap(oID));
+            shortActiveCount++;
         } else {
             insert(longQueue, OrderId.unwrap(oID));
+            longActiveCount++;
         }
 
         emit PositionRegistered(oID, tPx, pos.isShort);
@@ -168,8 +174,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
 
         if (isShort) {
             insert(shortQueue, rawId);
+            shortActiveCount++;
         } else {
             insert(longQueue, rawId);
+            longActiveCount++;
         }
 
         emit TriggerPxUpdated(oID, oldPx, newPx);
@@ -246,8 +254,8 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         view
         returns (uint256 longCount, uint256 shortCount)
     {
-        longCount = longQueue.nodeCount;
-        shortCount = shortQueue.nodeCount;
+        longCount = longActiveCount;
+        shortCount = shortActiveCount;
     }
 
     // -------- Internal -------- //
@@ -266,8 +274,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         // 1. Remove from queue
         if (isShort) {
             remove(shortQueue, rawId);
+            shortActiveCount--;
         } else {
             remove(longQueue, rawId);
+            longActiveCount--;
         }
 
         // 2. Get position and compute bankruptcy price
@@ -336,8 +346,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
 
         if (isShort && contains(shortQueue, rawId)) {
             remove(shortQueue, rawId);
+            shortActiveCount--;
         } else if (!isShort && contains(longQueue, rawId)) {
             remove(longQueue, rawId);
+            longActiveCount--;
         }
 
         delete triggerPx[oID];

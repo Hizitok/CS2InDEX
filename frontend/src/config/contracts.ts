@@ -2,12 +2,27 @@
 export const CONTRACTS = {
   VAULT: '0x...' as `0x${string}`,
   FACTORY: '0x...' as `0x${string}`,
-  LIQUIDATION_ENGINE: '0x...' as `0x${string}`,
-  ADL_ENGINE: '0x...' as `0x${string}`,
   USDC: '0x...' as `0x${string}`,
 } as const;
 
-// Contract ABIs
+// Price decimals (aligned with USDC = 6)
+export const PX_DECIMALS = 6;
+
+// orderType enum values: none=0, Market=1, Limit=2, FOK=3, IOC=4
+export const ORDER_TYPE = {
+  None: 0,
+  Market: 1,
+  Limit: 2,
+  FOK: 3,
+  IOC: 4,
+} as const;
+
+// Fee rates
+export const MAKER_FEE = 0.003; // 0.3%
+export const TAKER_FEE = 0.005; // 0.5%
+
+// ========== Contract ABIs (aligned with Solidity interfaces) ==========
+
 export const VAULT_ABI = [
   {
     inputs: [{ name: 'amount', type: 'uint256' }],
@@ -24,6 +39,16 @@ export const VAULT_ABI = [
     type: 'function',
   },
   {
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    name: 'withdrawTo',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
     inputs: [{ name: 'user', type: 'address' }],
     name: 'balanceOf',
     outputs: [{ name: '', type: 'uint256' }],
@@ -31,72 +56,73 @@ export const VAULT_ABI = [
     type: 'function',
   },
   {
-    inputs: [{ name: 'user', type: 'address' }],
-    name: 'availableBalance',
-    outputs: [{ name: '', type: 'uint256' }],
+    inputs: [],
+    name: 'supportedToken',
+    outputs: [{ name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
-    inputs: [{ name: 'user', type: 'address' }],
-    name: 'getUserBalanceInfo',
+    inputs: [],
+    name: 'getVaultStats',
     outputs: [
-      { name: 'total', type: 'uint256' },
-      { name: 'locked', type: 'uint256' },
-      { name: 'available', type: 'uint256' },
+      { name: '_supportedToken', type: 'address' },
+      { name: '_totalAmount', type: 'uint256' },
+      { name: '_actualBalance', type: 'uint256' },
     ],
     stateMutability: 'view',
     type: 'function',
   },
 ] as const;
 
+// PoolOrder: { isSell: bool, oType: uint8, size: uint256, price: uint256 }
+const POOL_ORDER_COMPONENTS = [
+  { name: 'isSell', type: 'bool' },
+  { name: 'oType', type: 'uint8' },
+  { name: 'size', type: 'uint256' },
+  { name: 'price', type: 'uint256' },
+] as const;
+
 export const POOL_ABI = [
+  // newOrder(uint256 margin, PoolOrder pOrder) => OrderId
   {
     inputs: [
-      {
-        components: [
-          { name: 'isSell', type: 'bool' },
-          { name: 'oType', type: 'uint8' },
-          { name: 'size', type: 'uint256' },
-          { name: 'priceX100', type: 'uint256' },
-          { name: 'margin', type: 'uint256' },
-        ],
-        name: 'pOrder',
-        type: 'tuple',
-      },
+      { name: 'margin', type: 'uint256' },
+      { components: POOL_ORDER_COMPONENTS, name: 'pOrder', type: 'tuple' },
     ],
     name: 'newOrder',
-    outputs: [{ name: '', type: 'uint256' }],
+    outputs: [{ name: 'newPosId', type: 'uint256' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // closePosition(OrderId orderId, PoolOrder pOrder) => OrderId
   {
     inputs: [
       { name: 'orderId', type: 'uint256' },
-      {
-        components: [
-          { name: 'isSell', type: 'bool' },
-          { name: 'oType', type: 'uint8' },
-          { name: 'size', type: 'uint256' },
-          { name: 'priceX100', type: 'uint256' },
-          { name: 'margin', type: 'uint256' },
-        ],
-        name: 'pOrder',
-        type: 'tuple',
-      },
+      { components: POOL_ORDER_COMPONENTS, name: 'pOrder', type: 'tuple' },
     ],
     name: 'closePosition',
-    outputs: [{ name: '', type: 'uint256' }],
+    outputs: [{ name: 'newPosId', type: 'uint256' }],
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // cancelOrder(OrderId orderId) => bool
   {
     inputs: [{ name: 'orderId', type: 'uint256' }],
     name: 'cancelOrder',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  // settlePnL(OrderId orderId)
+  {
+    inputs: [{ name: 'orderId', type: 'uint256' }],
+    name: 'settlePnL',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
   },
+  // getLastPrice() => uint256
   {
     inputs: [],
     name: 'getLastPrice',
@@ -104,27 +130,14 @@ export const POOL_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
-  {
-    inputs: [],
-    name: 'getPoolInfo',
-    outputs: [
-      { name: 'lastPriceX100', type: 'uint256' },
-      { name: 'oraclePriceX100', type: 'uint256' },
-      { name: 'feeCollected', type: 'uint256' },
-      { name: 'askMin', type: 'uint256' },
-      { name: 'bidMax', type: 'uint256' },
-    ],
-    stateMutability: 'view',
-
-    type: 'function',
-  },
+  // getOrderbookInfo() => (lastPrice, ask1Price, bid1Price)
   {
     inputs: [],
     name: 'getOrderbookInfo',
     outputs: [
-      { name: 'lastPrice', type: 'uint256' },
-      { name: 'askPrice', type: 'uint256' },
-      { name: 'bidPrice', type: 'uint256' },
+      { name: '_lastPriceX100', type: 'uint256' },
+      { name: '_ask1Price', type: 'uint256' },
+      { name: '_bid1Price', type: 'uint256' },
     ],
     stateMutability: 'view',
     type: 'function',
@@ -172,6 +185,14 @@ export const POOL_ABI = [
     type: 'function',
   },
   {
+    inputs: [],
+    name: 'engine',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  // Events
+  {
     anonymous: false,
     inputs: [
       { indexed: true, name: 'orderId', type: 'uint256' },
@@ -194,28 +215,40 @@ export const POOL_ABI = [
     name: 'OrderMatched',
     type: 'event',
   },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'orderId', type: 'uint256' },
+      { indexed: true, name: 'trader', type: 'address' },
+    ],
+    name: 'OrderCancelled',
+    type: 'event',
+  },
+  {
+    anonymous: false,
+    inputs: [
+      { indexed: true, name: 'orderId', type: 'uint256' },
+      { indexed: true, name: 'trader', type: 'address' },
+      { indexed: false, name: 'pnl', type: 'int256' },
+      { indexed: false, name: 'fees', type: 'uint256' },
+    ],
+    name: 'PnLSettled',
+    type: 'event',
+  },
 ] as const;
 
 export const FACTORY_ABI = [
   {
-    inputs: [{ name: 'itemName', type: 'string' }],
-    name: 'getPool',
-    outputs: [{ name: '', type: 'address' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [{ name: 'itemName', type: 'string' }],
+    inputs: [{ name: 'pool', type: 'address' }],
     name: 'getPoolInfo',
     outputs: [
       {
         components: [
-          { name: 'poolAddress', type: 'address' },
-          { name: 'oracle', type: 'address' },
-          { name: 'positionNFT', type: 'address' },
-          { name: 'itemName', type: 'string' },
+          { name: 'factory', type: 'address' },
+          { name: 'pool', type: 'address' },
+          { name: 'engine', type: 'address' },
           { name: 'deployedAt', type: 'uint256' },
-          { name: 'active', type: 'bool' },
+          { name: 'itemName', type: 'string' },
         ],
         name: '',
         type: 'tuple',
@@ -228,6 +261,62 @@ export const FACTORY_ABI = [
     inputs: [],
     name: 'getAllPools',
     outputs: [{ name: '', type: 'address[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'poolCount',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'pool', type: 'address' }],
+    name: 'isValidPool',
+    outputs: [{ name: '', type: 'bool' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'vault',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'oracle',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'nft',
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'pool', type: 'address' }],
+    name: 'getPoolStats',
+    outputs: [
+      {
+        components: [
+          { name: 'factory', type: 'address' },
+          { name: 'pool', type: 'address' },
+          { name: 'engine', type: 'address' },
+          { name: 'deployedAt', type: 'uint256' },
+          { name: 'itemName', type: 'string' },
+        ],
+        name: 'info',
+        type: 'tuple',
+      },
+      { name: 'lastPrice', type: 'uint256' },
+      { name: 'oraclePrice_', type: 'uint256' },
+    ],
     stateMutability: 'view',
     type: 'function',
   },
@@ -270,18 +359,49 @@ export const ERC20_ABI = [
   },
 ] as const;
 
+// calculateFundingRate returns (avgVTWAPDiff, interestRate, fundingRate) — all int128
 export const INDEX_ORACLE_ABI = [
   {
     inputs: [{ name: 'pool', type: 'address' }],
     name: 'calculateFundingRate',
     outputs: [
-      { name: 'fundingRate', type: 'int256' },
-      { name: 'avgPremiumIndex', type: 'int256' },
-      { name: 'interestRate', type: 'int256' },
+      { name: 'avgVTWAPDiff', type: 'int128' },
+      { name: 'interestRate', type: 'int128' },
+      { name: 'fundingRate', type: 'int128' },
     ],
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [{ name: 'pool', type: 'address' }],
+    name: 'oraclePrice',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'pool', type: 'address' }],
+    name: 'updateTime',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+] as const;
+
+// Position struct: 12 fields matching OrderTypes.sol
+const POSITION_COMPONENTS = [
+  { name: 'positionID', type: 'uint256' },
+  { name: 'pool', type: 'address' },
+  { name: 'isShort', type: 'bool' },
+  { name: 'status', type: 'uint8' },
+  { name: 'openMargin', type: 'uint256' },
+  { name: 'pendingSize', type: 'uint256' },
+  { name: 'openSize', type: 'uint256' },
+  { name: 'closeSize', type: 'uint256' },
+  { name: 'openAmount', type: 'uint256' },
+  { name: 'closeAmount', type: 'uint256' },
+  { name: 'openFundingIdx', type: 'uint256' },
+  { name: 'closeFundingIdx', type: 'uint256' },
 ] as const;
 
 export const POSITION_NFT_ABI = [
@@ -304,23 +424,31 @@ export const POSITION_NFT_ABI = [
     name: 'getPositionsByOwner',
     outputs: [
       { name: 'tokenIds', type: 'uint256[]' },
-      {
-        name: 'positions',
-        type: 'tuple[]',
-        components: [
-          { name: 'pool', type: 'address' },
-          { name: 'positionID', type: 'uint256' },
-          { name: 'status', type: 'uint8' },
-          { name: 'isShort', type: 'bool' },
-          { name: 'openMargin', type: 'uint256' },
-          { name: 'pendingSize', type: 'uint256' },
-          { name: 'openSize', type: 'uint256' },
-          { name: 'closeSize', type: 'uint256' },
-          { name: 'openAmount', type: 'uint256' },
-          { name: 'closeAmount', type: 'uint256' },
-        ],
-      },
+      { name: 'positions', type: 'tuple[]', components: POSITION_COMPONENTS },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'oID', type: 'uint256' }],
+    name: 'getPosition',
+    outputs: [
+      { name: '', type: 'tuple', components: POSITION_COMPONENTS },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ name: 'orderId', type: 'uint256' }],
+    name: 'getOpenTick',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'totalSupply',
+    outputs: [{ name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },

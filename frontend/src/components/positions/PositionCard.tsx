@@ -11,7 +11,7 @@
 import { useState } from 'react';
 import { formatUnits, parseUnits } from 'viem';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { POOL_ABI } from '@/config/contracts';
+import { POOL_ABI, PX_DECIMALS, ORDER_TYPE } from '@/config/contracts';
 import toast from 'react-hot-toast';
 import { TrendingUp, TrendingDown, X, Info, ShieldAlert } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -21,16 +21,18 @@ import { useLanguage } from '@/contexts/LanguageContext';
  * @interface Position
  */
 interface Position {
-  pool: string;
   positionID: bigint;
-  status: number; // 2 = Open
+  pool: string;
   isShort: boolean;
+  status: number; // 0=none, 1=pendingOpen, 2=open, 3=pendingClose, 4=liquidating, 5=closed, 6=settled
   openMargin: bigint;
   pendingSize: bigint;
   openSize: bigint;
   closeSize: bigint;
   openAmount: bigint; // Total value at open (Size * Price)
   closeAmount: bigint;
+  openFundingIdx: bigint;
+  closeFundingIdx: bigint;
 }
 
 interface PositionCardProps {
@@ -38,7 +40,7 @@ interface PositionCardProps {
   position: Position;
 }
 
-const STATUS_NAMES = ['None', 'Pending Open', 'Open', 'Pending Close', 'Force Close', 'Closed'];
+const STATUS_NAMES = ['None', 'Pending Open', 'Open', 'Pending Close', 'Liquidating', 'Closed', 'Settled'];
 
 /**
  * 单个持仓卡片
@@ -58,13 +60,13 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
   // 1. 计算平均开仓价格 (Entry Price)
   // Formula: OpenAmount / OpenSize / 100 (Price decimal = 2)
   // 注意：OpenSize 是单位数，OpenAmount 是总价值(Price*Size)
+  // pxDecimals = 6: openAmount = sum(matchedPrice * matchedSize), both in 6 decimals
+  // entryPrice = openAmount / openSize (result is in 6 decimals, divide by 1e6 for display)
   let entryPrice = 0;
   try {
     if (position.openSize > 0n) {
-      // 这里的逻辑需要根据合约具体实现调整。假设 OpenAmount = Size * Price * 100 implies Price = OpenAmount / Size / 100
-      // 避免除零错误
       const priceScaled = Number(position.openAmount) / Number(position.openSize);
-      entryPrice = priceScaled / 100;
+      entryPrice = priceScaled / (10 ** PX_DECIMALS);
     }
   } catch (e) {
     console.error('Error calculating entry price', e);
@@ -93,10 +95,9 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
 
       const closeOrder = {
         isSell: !position.isShort, // Close long = Sell, Close short = Buy
-        oType: 1, // Limit Order
+        oType: ORDER_TYPE.Limit,
         size: position.openSize,
-        priceX100: BigInt(Math.floor(parseFloat(closePrice) * 100)),
-        margin: 0n,
+        price: parseUnits(closePrice, PX_DECIMALS),
       };
 
       console.log('Closing position:', tokenId, closeOrder);

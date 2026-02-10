@@ -1,6 +1,6 @@
 import { useWriteContract } from 'wagmi';
 import { parseUnits } from 'viem';
-import { POOL_ABI } from '@/config/contracts';
+import { POOL_ABI, PX_DECIMALS, ORDER_TYPE } from '@/config/contracts';
 
 export function useClosePosition() {
     const { writeContract, ...rest } = useWriteContract();
@@ -11,17 +11,13 @@ export function useClosePosition() {
         size: string,
         price: string,
         isSell: boolean,
-        marginStr: string = '0'
     ) => {
-        // contract.ts closePosition inputs: [orderId, pOrder]
-        // pOrder components: isSell, oType, size, priceX100, margin
-
+        // PoolOrder struct: { isSell, oType, size, price } — no margin field
         const pOrder = {
-            isSell, // Opposite of position side? Usually close order is opposite.
-            oType: 2, // Limit order
-            size: parseUnits(size, 18),
-            priceX100: parseUnits(price, 18),
-            margin: parseUnits(marginStr, 6),
+            isSell,
+            oType: ORDER_TYPE.Limit,
+            size: parseUnits(size, PX_DECIMALS),
+            price: parseUnits(price, PX_DECIMALS),
         };
 
         writeContract({

@@ -83,12 +83,16 @@ contract IndexOracle is Ownable, IOracle {
         require(newIndexPrice > 0, "Invalid index price");
         oraclePrice[pool] = newIndexPrice;
         updateTime[pool] = block.timestamp;
+
+        // Notify pool of price update
+        IPool(pool).updateOraclePrice(newIndexPrice);
+
         emit IndexPriceUpdated(pool, newIndexPrice);
     }
 
     /**
-     * @notice 
-     * @dev When a new trade matches, pool call the oracle to update
+     * @notice Record a trade for VTWAP calculation
+     * @dev When a new trade matches, pool calls the oracle to update premium accumulator
      * @param size The matched trading size
      * @param price The matched trading price
      */
@@ -139,9 +143,9 @@ contract IndexOracle is Ownable, IOracle {
      * @notice Calculate funding rate for a pool
      * @dev Formula: fundingRate = clamp[avgVTWAPDiff + clamp(interestRate - avgVTWAPDiff, 0.05%, -0.05%), cap, floor]
      * @param pool The pool address
-     * @return avgVTWAPDiff The calculated funding rate in basis points
-     * @return interestRate average premium index used
-     * @return fundingRate The interest rate used
+     * @return avgVTWAPDiff Average VTWAP premium in basis points
+     * @return interestRate Interest rate in basis points
+     * @return fundingRate Final clamped funding rate in basis points
      */
     function calculateFundingRate(address pool)
         public
@@ -175,7 +179,7 @@ contract IndexOracle is Ownable, IOracle {
         // Step 6: Outer clamp - limit to [floor, cap]
         fundingRate = clamp(rawFundingRate, fundingRateFloor, fundingRateCap);
 
-        return (avgVTWAPDiff, fundingRate, interestRate);
+        return (avgVTWAPDiff, interestRate, fundingRate);
     }
 
     /**
@@ -188,15 +192,19 @@ contract IndexOracle is Ownable, IOracle {
 
         (int256 avgVTWAPRate, int256 interestRate, int256 fundingRate) = calculateFundingRate(pool);
 
-        // Convert funding rate to funding index update
-        // The funding index accumulates over time
-        // If fundingRate is positive, longs pay shorts; if negative, shorts pay longs
+        // Convert funding rate to funding index change
+        // fundingIdx accumulates price-proportional funding:
+        //   change = oraclePrice * fundingRate / BASIS_POINT
+        // Positive fundingRate → longs pay shorts (fundingIdx increases)
+        // Negative fundingRate → shorts pay longs (fundingIdx decreases)
         uint256 currentFundingIdx = IPool(pool).fundingIdx();
-
-        // Calculate funding index change
-        // newFundingIdx = currentFundingIdx * (1 + fundingRate/BASIS_POINT)
-        int256 fundingChange = int256(currentFundingIdx) * fundingRate / BASIS_POINT;
-        uint256 newFundingIdx = uint256(int256(currentFundingIdx) + fundingChange);
+        int256 fundingChange = int256(oraclePrice[pool]) * fundingRate / BASIS_POINT;
+        uint256 newFundingIdx;
+        if (int256(currentFundingIdx) + fundingChange > 0) {
+            newFundingIdx = uint256(int256(currentFundingIdx) + fundingChange);
+        } else {
+            newFundingIdx = 0;
+        }
 
         // Update pool's funding index
         IPool(pool).updateFundingIndex(newFundingIdx);

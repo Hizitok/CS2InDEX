@@ -24,19 +24,17 @@ CS2InDEX is inspired by traditional cryptocurrency exchanges like Binance and OK
 - **Leverage Trading** - Up to 6x leverage on positions
 - **Long & Short** - Profit from both rising and falling prices
 - **NFT Positions** - Each position is an ERC721 NFT (transferable)
-- **On-Chain Order Book** - Red-Black Tree implementation for efficient matching
+- **On-Chain Order Book** - Order Statistics Tree for efficient matching
 
 ### 🔒 Risk Management
 - **Isolated Margin** - Each position has independent risk
-- **Automated Liquidations** - 5% maintenance margin, 2.5% liquidator reward
-- **Insurance Fund** - Covers bad debt from liquidations
-- **ADL (Auto-Deleveraging)** - Last resort when insurance depleted
+- **Automated Liquidations** - 20% maintenance margin, two-step model
+- **Funding Rate** - 8-hour settlement period, ±2% cap
 - **Real-Time Oracle** - Continuous price feeds from external sources
 
 ### 💰 Fee Structure
 - **Maker Fee**: 0.3% (liquidity providers)
 - **Taker Fee**: 0.5% (liquidity takers)
-- **Liquidation Fee**: 2.5% (goes to liquidators)
 
 ## Architecture
 
@@ -58,15 +56,15 @@ CS2InDEX is inspired by traditional cryptocurrency exchanges like Binance and OK
 │  └───────────────────────────────────────────────────┘  │
 │                                                         │
 │  ┌──────────────────┐  ┌──────────────────┐             │
-│  │ ADL Engine       │  │  ADL  Engine     │             │
-│  │                  │  │                  │             │
+│  │ Liquidation      │  │  ADL  Engine     │             │
+│  │ Engine           │  │  (Planned)       │             │
 │  │ Auto liquidate   │  │ Emergency        │             │
 │  │ underwater pos.  │  │ deleveraging     │             │
 │  └──────────────────┘  └──────────────────┘             │
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
-│  │           CS2IndexOracle.sol                      │  │
-│  │     Updated by external price feed service        │  │
+│  │           IndexOracle.sol                         │  │
+│  │     Price feed + Funding rate settlement          │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
@@ -107,19 +105,19 @@ CS2InDEX is inspired by traditional cryptocurrency exchanges like Binance and OK
 ```
 CS2InDEX/
 ├── src/                      # Smart contracts (Solidity)
-│   ├── Vault.sol            # Collateral vault with locking
-│   ├── Pool.sol             # Trading pool with order book
-│   ├── PositionNFT.sol      # ERC721 position tokens
-│   ├── Engine.sol           # Liquidation, ADL, Oracle
 │   ├── Factory.sol          # Pool deployment & management
-│   └── libraries/           # RedBlackTree, OrderTypes, etc.
+│   ├── Vault.sol            # Collateral vault
+│   ├── Pool.sol             # Order book & matching engine
+│   ├── PositionNFT.sol      # ERC721 position tokens
+│   ├── Liquidation.sol      # Liquidation engine
+│   ├── IndexOracle.sol      # Price oracle & funding rate
+│   ├── Router.sol           # User interaction entry point
+│   └── libraries/           # OS Tree, OrderTypes, PosERC721, etc.
 │
-├── test/                     # Foundry tests (87 tests)
-│   ├── Vault.t.sol          # Vault tests (20)
-│   ├── Pool.t.sol           # Pool tests (17)
-│   ├── Engine.t.sol         # Engine tests (19)
-│   ├── Factory.t.sol        # Factory tests (22)
-│   ├── Integration.t.sol    # Integration tests (9)
+├── test/                     # Foundry tests
+│   ├── Pool.t.sol           # Pool unit tests
+│   ├── Integration.t.sol    # Integration tests
+│   ├── OrderStatisticsTree.t.sol  # OS Tree tests
 │   └── mocks/               # Mock contracts
 │
 ├── script/                   # Deployment scripts
@@ -187,7 +185,7 @@ cd ..
 ### 3. Run Tests
 
 ```bash
-# Run all smart contract tests (87 tests)
+# Run all smart contract tests
 forge test
 
 # Run with gas report
@@ -255,34 +253,32 @@ See [frontend/README.md](frontend/README.md) for detailed frontend guide.
 
 | Contract | Description | Lines of Code |
 |----------|-------------|---------------|
-| `Vault.sol` | Collateral management with locking | ~200 |
-| `Pool.sol` | Order book & matching engine | ~400 |
-| `PositionNFT.sol` | ERC721 position tokens | ~150 |
-| `LiquidationEngine.sol` | Automated liquidations | ~200 |
-| `ADLEngine.sol` | Auto-deleveraging | ~150 |
-| `CS2IndexOracle.sol` | Price oracle | ~100 |
-| `Factory.sol` | Pool deployment | ~250 |
+| `Factory.sol` | Pool deployment & management | ~170 |
+| `Vault.sol` | Collateral management | ~240 |
+| `Pool.sol` | Order book & matching engine | ~600 |
+| `PositionNFT.sol` | ERC721 position tokens | ~250 |
+| `Liquidation.sol` | Liquidation engine | ~360 |
+| `IndexOracle.sol` | Price oracle & funding rate | ~285 |
+| `Router.sol` | User interaction entry point | ~120 |
 
 ### Libraries
 
 | Library | Description |
 |---------|-------------|
-| `RedBlackTree.sol` | On-chain order book data structure |
+| `IzitOSTreeMinimum.sol` | Order Statistics Tree (on-chain order book) |
 | `OrderTypes.sol` | Common types and structs |
+| `PosERC721.sol` | Minimal ERC721 for position NFTs |
+| `PoolDeployer.sol` | Pool & engine deployment helper |
+| `Ownable.sol` | Ownership management |
+| `ReentrancyGuard.sol` | Reentrancy protection |
 
-### Test Coverage
-
-- **Total Tests**: 87
-- **Coverage**: ~90% of core functionality
-- **Categories**:
-  - Unit Tests: 69
-  - Integration Tests: 9
-  - Authorization Tests: 9
+### Testing
 
 Run tests:
 ```bash
 forge test
-forge coverage  # Generate coverage report
+forge test --match-test <name> -vv  # Run specific test with verbose output
+forge test -vvvv                     # Full trace
 ```
 
 ## Trading Flow
@@ -297,13 +293,12 @@ forge coverage  # Generate coverage report
 2. **Create Order**
    ```solidity
    PoolOrder memory order = PoolOrder({
-     isSell: false,      // Long position
-     oType: 1,           // Limit order
-     size: 10e6,         // 10 units
-     priceX100: 50000,   // $500.00
-     margin: 1000e6      // 1000 USDC margin
+     isSell: false,              // Long position
+     oType: orderType.Limit,     // Limit order
+     size: 10e6,                 // 10 units
+     price: 500e6                // $500.00 (6 decimals)
    });
-   pool.newOrder(order);
+   pool.newOrder(1000e6, order); // 1000 USDC margin
    ```
 
 3. **Order Matching**
@@ -316,11 +311,10 @@ forge coverage  # Generate coverage report
 
 ```solidity
 PoolOrder memory closeOrder = PoolOrder({
-  isSell: true,       // Close long with sell
-  oType: 1,           // Limit order
-  size: 10e6,         // Close entire position
-  priceX100: 55000,   // $550.00
-  margin: 0           // No additional margin
+  isSell: true,              // Close long with sell
+  oType: orderType.Limit,    // Limit order
+  size: 10e6,                // Close entire position
+  price: 550e6               // $550.00 (6 decimals)
 });
 pool.closePosition(positionId, closeOrder);
 ```
@@ -329,22 +323,21 @@ PnL is automatically calculated and settled to trader's vault balance.
 
 ## Liquidation Mechanism
 
-Positions are liquidated when:
+Positions are liquidated when remaining margin falls below 20% of initial margin:
 ```
-Margin Ratio = Available Margin / Position Value < 5%
+Remaining Margin < 20% × Open Margin  →  Trigger Liquidation
 ```
 
-**Liquidation Process:**
-1. Liquidator calls `liquidationEngine.liquidate(pool, positionId)`
-2. Position is force-closed at market price
-3. Liquidator receives 2.5% of position value
-4. Remaining margin returned to trader (if any)
-5. Deficit covered by insurance fund
+**Two-Step Liquidation Model:**
+1. **Trigger**: Anyone calls `liquidationEngine.liquidate()` — sweeps all triggered positions
+2. **Action**: For each triggered position, a Limit closing order is placed at the **bankruptcy price** (where margin = 0)
+3. The order enters the normal orderbook matching flow
+4. If matched, PnL is settled; remaining margin (if any) returned to trader
 
-**ADL (Auto-Deleveraging):**
-- Triggered when insurance fund is insufficient
-- Opposite positions are automatically closed
-- Prioritized by profitability and leverage
+**Price Derivation:**
+- **Trigger Price**: price where remaining margin = 20% of open margin
+- **Bankruptcy Price**: price where remaining margin = 0
+- Both prices account for accumulated funding rate
 
 ## Security
 

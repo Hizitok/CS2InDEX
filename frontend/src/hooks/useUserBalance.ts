@@ -4,6 +4,7 @@ import { VAULT_ABI, CONTRACTS } from '@/config/contracts';
 export function useUserBalance() {
     const { address } = useAccount();
 
+    // Vault only has balanceOf(address) — no locked/available split
     const { data, isLoading } = useReadContract({
         address: CONTRACTS.VAULT,
         abi: VAULT_ABI,
@@ -14,19 +15,8 @@ export function useUserBalance() {
         }
     });
 
-    const { data: balanceInfo } = useReadContract({
-        address: CONTRACTS.VAULT,
-        abi: VAULT_ABI,
-        functionName: 'getUserBalanceInfo',
-        args: address ? [address] : undefined,
-        query: {
-            enabled: !!address,
-        }
-    });
-
     return {
-        balance: data, // from balanceOf
-        balanceInfo, // from getUserBalanceInfo
+        balance: data,
         isLoading,
     };
 }

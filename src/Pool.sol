@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import {IPool} from "./interfaces/IPool.sol";
 import {IVault} from "./interfaces/IVault.sol";
 import {IPosition} from "./interfaces/IPosition.sol";
+import {IOracle} from "./interfaces/IOracle.sol";
+import {IEngine} from "./interfaces/IEngine.sol";
 import {Ownable} from "./libraries/Ownable.sol";
 import {IzitOSTreeMinimum} from "./libraries/IzitOSTreeMinimum.sol";
 
@@ -21,7 +23,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     address public vault;
     address public engine;
 
-    uint256 public fundingIdx = 1 << 126;
+    uint256 public fundingIdx = 1 << 63;
     uint256 public lastPrice;
     uint256 public oraclePrice;
     uint256 public maxLeverage = 600;
@@ -79,11 +81,16 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         public 
         returns (OrderId newPosId) 
     {
-        // Price sanity check
-        if (pOrder.price <= lastPrice *2) revert PxOverflow();
-        if (pOrder.price >= lastPrice /2) revert PxUnderflow();
+        // Price sanity check (skip for market orders)
+        if (pOrder.oType != orderType.Market) {
+            if (pOrder.price > lastPrice * 2) revert PxOverflow();
+            if (pOrder.price < lastPrice / 2) revert PxUnderflow();
+        }
 
-        if (margin* maxLeverage / 100 >= pOrder.size * pOrder.price) 
+        // Leverage check: position value (in currency units) must not exceed margin * maxLeverage
+        // Position value = size * price / 10**pxDecimals
+        // Max value = margin * maxLeverage / 100
+        if ((pOrder.size * pOrder.price) / (10 ** pxDecimals) > margin * maxLeverage / 100)
             revert LeverageOverflow();
 
         // Transfer margin from Vault contract to pool
@@ -98,14 +105,15 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         orderMatching(newPosId, pOrder);
     }
 
-    function cancelOrder(OrderId orderId) 
+    function cancelOrder(OrderId orderId)
         public
         returns (bool cancelSuccess)
     {
         bool isSellOrder;
         Position memory pos;
+        uint256 refundAmount = 0;
 
-        if ( !IPosition(positionNFT).isAuthorized(orderId, msg.sender) ) 
+        if ( !IPosition(positionNFT).isAuthorized(orderId, msg.sender) )
             revert NotAuthorized();
         pos = IPosition(positionNFT).getPosition(orderId);
 
@@ -116,17 +124,36 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         if ( pos.status == posStatus.pendingOpen ) {
 
             isSellOrder = pos.isShort;
-            if( pos.pendingSize == 0 ) revert InvalidStatus(); 
+            if( pos.pendingSize == 0 ) revert InvalidStatus();
+
+            // Save cancelled size before modifying
+            uint256 cancelledSize = pos.pendingSize;
 
             remove( isSellOrder ?_ask_OB:_bid_OB, OrderId.unwrap(orderId));
             pos.pendingSize = 0;
 
+            // Calculate proportional refund for cancelled portion
+            if ( pos.openSize == 0 ) {
+                // Fully cancelled (no fills), refund all margin
+                refundAmount = pos.openMargin;
+            } else {
+                // Partially filled, refund margin for cancelled portion only
+                uint256 totalSize = pos.openSize + cancelledSize;
+                refundAmount = pos.openMargin * cancelledSize / totalSize;
+            }
+
+            // Update position margin to reflect the refund
+            pos.openMargin -= refundAmount;
+
         } else if ( pos.status == posStatus.pendingClose ) {
 
             isSellOrder = !pos.isShort;
-            if( pos.openSize == 0 ) revert InvalidStatus(); 
+            if( pos.openSize == 0 ) revert InvalidStatus();
 
-            remove( isSellOrder ?_bid_OB:_ask_OB, OrderId.unwrap(orderId));
+            remove( isSellOrder ? _ask_OB : _bid_OB, OrderId.unwrap(orderId));
+
+            // For close orders, no refund needed (margin stays with open position)
+            refundAmount = 0;
 
         } else {
             revert CancelFailed();
@@ -140,6 +167,18 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         }
 
         IPosition(positionNFT).updatePosition(orderId, pos);
+
+        // Register with liquidation engine if position became open
+        if (engine != address(0) && pos.status == posStatus.open) {
+            IEngine(engine).registerPosition(orderId);
+        }
+
+        // Refund margin to caller (only for pendingOpen with unfilled portion)
+        if (refundAmount > 0) {
+            IVault(vault).internalTransfer(address(this), msg.sender, refundAmount);
+        }
+
+        emit OrderCancelled(orderId, msg.sender);
         cancelSuccess = true;
     }
 
@@ -147,9 +186,11 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         external
         returns (OrderId)
     {
-        // Price sanity check
-        if (pOrder.price <= lastPrice *2) revert PxOverflow();
-        if (pOrder.price >= lastPrice /2) revert PxUnderflow();
+        // Price sanity check (skip for market orders)
+        if (pOrder.oType != orderType.Market) {
+            if (pOrder.price > lastPrice * 2) revert PxOverflow();
+            if (pOrder.price < lastPrice / 2) revert PxUnderflow();
+        }
 
         // Verify Authority
         if ( !IPosition(positionNFT).isAuthorized(orderId, msg.sender) ) 
@@ -211,7 +252,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         // PnL = (closeAmount - openAmount) * direction
         // direction: long = +1, short = -1
         int256 pnl;
-        if ( pos.isShort) {
+        if ( pos.isShort ) {
             // Short: profit when sell high, buy low
             // PnL = openAmount - closeAmount + funding change
             pnl = int256(pos.openAmount) - int256(pos.closeAmount);
@@ -228,7 +269,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
 
         // Calculate final return = openMargin + PnL
         uint256 finalReturn;
-        if ( pnlAmount >= 0) {
+        if ( pnlAmount >= 0 ) {
             // Profit case
             finalReturn = pos.openMargin + uint256(pnlAmount);
         } else {
@@ -255,15 +296,23 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     // ------------ Self Balanced Tree Part ---------- //
 
     function getFirstOrder(bool isSell)
-        private 
-        view 
+        private
+        view
         returns (OrderId oid, uint256 size, uint256 price)
     {
+        // getMin/getMax return 0 if tree is empty
+        uint256 key;
         if(isSell){
-            oid = OrderId.wrap(getMin( _ask_OB ));
+            key = getMin(_ask_OB);
         } else {
-            oid = OrderId.wrap(getMax( _bid_OB ));
+            key = getMax(_bid_OB);
         }
+
+        if (key == 0) {
+            return (OrderId.wrap(0), 0, 0);
+        }
+
+        oid = OrderId.wrap(key);
         size = OBSize[oid];
         price = OBPx[oid];
     }
@@ -349,9 +398,13 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         // Match with maker orders
         while (_size > 0) {
             (stepId, stepSize, stepPx) = getFirstOrder(!pOrder.isSell);
+
+            // If orderbook is empty, stop matching
+            if (OrderId.unwrap(stepId) == 0) break;
+
             // check If it is a better price for taker
-            if (  
-                pOrder.oType == orderType.Market || 
+            if (
+                pOrder.oType == orderType.Market ||
                 (pOrder.isSell)? pOrder.price <= stepPx : pOrder.price >= stepPx
             ) {
                 (deltaSz,,) = matchMaking( stepId, takerId, pOrder.isSell );
@@ -440,14 +493,29 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         IPosition(positionNFT).updatePosition(buyID, buyPos);
         IPosition(positionNFT).updatePosition(sellID, sellPos);
 
+        // Register newly open positions with liquidation engine
+        if (engine != address(0)) {
+            if (buyPos.status == posStatus.open && buyPos.pendingSize == 0) {
+                IEngine(engine).registerPosition(buyID);
+            }
+            if (sellPos.status == posStatus.open && sellPos.pendingSize == 0) {
+                IEngine(engine).registerPosition(sellID);
+            }
+        }
+
         // Auto-settle if position is fully closed
         if ( buyPos.status == posStatus.closed && buyPos.openSize == 0) {
+            if (engine != address(0)) IEngine(engine).removePosition(buyID);
             settlePnL(buyID);
         }
         if ( sellPos.status == posStatus.closed && sellPos.openSize == 0) {
+            if (engine != address(0)) IEngine(engine).removePosition(sellID);
             settlePnL(sellID);
         }
         lastPrice = fillPx;
+
+        // Notify oracle of trade for funding rate calculation
+        IOracle(oracle).updatePoolInfo(fillSz, fillPx);
 
     }
 

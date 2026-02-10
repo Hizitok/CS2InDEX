@@ -23,9 +23,6 @@ contract positionNFT is OrderTypes, PosERC721 {
     // Position settled status (prevents double settlement)
     mapping(uint256 => bool) private _settled;
 
-    mapping(uint256 => address) _owners;
-    mapping(address => uint256) _balances;
-
     // Events
     event PositionCreated(
         uint256 indexed tokenId,
@@ -100,6 +97,7 @@ contract positionNFT is OrderTypes, PosERC721 {
         _owners[tokenCount] = owner;
         _balances[owner] += 1;
 
+        emit Transfer(address(0), owner, tokenCount);
         emit PositionCreated(tokenCount, owner, newPos);
     }
 
@@ -126,6 +124,7 @@ contract positionNFT is OrderTypes, PosERC721 {
     function updatePosition(OrderId oID, Position memory pos)
         external
         onlyPool
+        returns (bool)
     {
         uint256 id = OrderId.unwrap(oID);
         require(_positions[id].positionID != 0, "Position does not exist");
@@ -134,6 +133,7 @@ contract positionNFT is OrderTypes, PosERC721 {
         _positions[id] = pos;
 
         emit PositionUpdated(id, pos);
+        return true;
     }
 
     /**

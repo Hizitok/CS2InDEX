@@ -12,7 +12,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import toast from 'react-hot-toast';
-import { POOL_ABI } from '@/config/contracts';
+import { POOL_ABI, PX_DECIMALS, ORDER_TYPE, TAKER_FEE } from '@/config/contracts';
 import { TrendingUp, TrendingDown, Info, Wallet, Calculator } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -120,7 +120,7 @@ export function TradingInterface() {
       }
     }
 
-    const tradingFee = positionValue * 0.001; // 0.1%
+    const tradingFee = positionValue * TAKER_FEE; // 0.5% taker fee
     const totalCost = m + tradingFee;
 
     return {
@@ -150,21 +150,21 @@ export function TradingInterface() {
     }
 
     try {
-      const orderArgs = {
+      const marginAmount = parseUnits(margin, PX_DECIMALS);
+      const pOrder = {
         isSell: !isLong,
-        oType: orderType === 'Limit' ? 1 : 0,
-        size: BigInt(size),
-        priceX100: orderType === 'Limit' ? parseUnits(price, 2) : BigInt(0),
-        margin: parseUnits(margin, 6),
+        oType: orderType === 'Limit' ? ORDER_TYPE.Limit : ORDER_TYPE.Market,
+        size: parseUnits(size, PX_DECIMALS),
+        price: orderType === 'Limit' ? parseUnits(price, PX_DECIMALS) : BigInt(0),
       };
 
-      console.log('Submitting Order:', orderArgs);
+      console.log('Submitting Order:', { margin: marginAmount, pOrder });
 
       writeContract({
         address: selectedItem.pool as `0x${string}`,
         abi: POOL_ABI,
         functionName: 'newOrder',
-        args: [orderArgs],
+        args: [marginAmount, pOrder],
       });
 
       toast.loading(t.trading.confirmInWallet);
@@ -333,7 +333,7 @@ export function TradingInterface() {
             </span>
           </div>
           <div className="flex justify-between">
-            <span className="text-gray-500">{t.trading.fee} (0.1%)</span>
+            <span className="text-gray-500">{t.trading.fee} (0.5%)</span>
             <span className="text-gray-300 font-mono">${derivedInfo.fee.toFixed(2)}</span>
           </div>
           <div className="border-t border-white/10 my-2 pt-2 flex justify-between font-bold">
