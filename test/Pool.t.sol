@@ -6,6 +6,7 @@ import {Pool} from "../src/Pool.sol";
 import {IPool} from "../src/interfaces/IPool.sol";
 import {IVault} from "../src/interfaces/IVault.sol";
 import {IPosition} from "../src/interfaces/IPosition.sol";
+import {IEngine} from "../src/interfaces/IEngine.sol";
 import {OrderTypes} from "../src/interfaces/OrderTypes.sol";
 
 /**
@@ -22,7 +23,7 @@ contract PoolTest is Test, OrderTypes {
     address public user1 = address(0x1);
     address public user2 = address(0x2);
     address public user3 = address(0x3);
-    address public engine = address(0x999);
+    MockEngine public mockEngine;
 
     uint256 constant INITIAL_PRICE = 50000e6; // $50k with 6 decimals
     uint256 constant PRICE_DECIMALS = 6;
@@ -46,8 +47,9 @@ contract PoolTest is Test, OrderTypes {
         // Set pool authorization in position NFT
         positionNFT.setPool(address(pool), true);
 
-        // Set engine
-        pool.setEngine(engine);
+        // Deploy and set engine
+        mockEngine = new MockEngine();
+        pool.setEngine(address(mockEngine));
 
         // Fund users in vault
         vault.mint(user1, 100000e6); // 100k USDC
@@ -606,7 +608,7 @@ contract PoolTest is Test, OrderTypes {
             price: 48000e6 // Bankruptcy price
         });
 
-        vm.prank(engine);
+        vm.prank(address(mockEngine));
         pool.forceLiquidate(longId, liquidateOrder);
 
         Position memory pos = positionNFT.getPosition(longId);
@@ -713,6 +715,10 @@ contract MockVault is IVault {
         balances[to] += amount;
     }
 
+    function depositFor(address beneficiary, uint256 amount) external {
+        balances[beneficiary] += amount;
+    }
+
     function deposit(uint256 amount) external {
         balances[msg.sender] += amount;
     }
@@ -795,21 +801,26 @@ contract MockPosition is IPosition {
         positions[OrderId.unwrap(posId)].status = posStatus.settled;
     }
 
-    function getPositionsByOwner(address owner) external view returns (uint256[] memory) {
+    function getPositionsByOwner(address owner)
+        external
+        view
+        returns (uint256[] memory tokenIds, Position[] memory posArr)
+    {
         uint256 count = 0;
         for (uint256 i = 1; i <= tokenIdCounter; i++) {
             if (owners[i] == owner) count++;
         }
 
-        uint256[] memory result = new uint256[](count);
+        tokenIds = new uint256[](count);
+        posArr   = new Position[](count);
         uint256 index = 0;
         for (uint256 i = 1; i <= tokenIdCounter; i++) {
             if (owners[i] == owner) {
-                result[index] = i;
+                tokenIds[index] = i;
+                posArr[index]   = positions[i];
                 index++;
             }
         }
-        return result;
     }
 
     function totalSupply() external view returns (uint256) {
@@ -830,5 +841,18 @@ contract MockPosition is IPosition {
 }
 
 contract MockOracle {
-    // Simple oracle mock - just needs to exist as an address
+    // updatePoolInfo is called by Pool.matchMaking after every fill
+    function updatePoolInfo(uint256, uint256) external {}
+}
+
+contract MockEngine is IEngine {
+    // Pool calls these during matching / settlement
+    function registerPosition(OrderId) external {}
+    function removePosition(OrderId) external {}
+    function updatePositionInfo(OrderId) external {}
+    // Anyone can trigger liquidations; no-op in mock
+    function liquidate() external {}
+    // View stubs
+    function getTriggerPx(OrderId) external pure returns (uint256) { return 0; }
+    function isLiquidatable(OrderId) external pure returns (bool) { return false; }
 }

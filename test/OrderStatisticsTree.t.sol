@@ -23,6 +23,11 @@ contract OrderStatisticsTreeTest is Test, IzitOSTreeMinimum {
         // Tree is initialized empty
     }
 
+    // ── external wrappers so vm.expectRevert works (needs sub-call depth) ────
+    function exposed_insert(uint256 key) external { insert(tree, key); }
+    function exposed_remove(uint256 key) external { remove(tree, key); }
+    function exposed_getRank(uint256 key) external view returns (uint256) { return getRank(tree, key); }
+
     /*//////////////////////////////////////////////////////////////
                         INSERT AND CONTAINS TESTS
     //////////////////////////////////////////////////////////////*/
@@ -52,12 +57,12 @@ contract OrderStatisticsTreeTest is Test, IzitOSTreeMinimum {
         insert(tree, 100);
 
         vm.expectRevert("Key already exists");
-        insert(tree, 100);
+        this.exposed_insert(100);
     }
 
     function testInsertRevertZeroKey() public {
         vm.expectRevert("Key cannot be 0");
-        insert(tree, 0);
+        this.exposed_insert(0);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -137,8 +142,8 @@ contract OrderStatisticsTreeTest is Test, IzitOSTreeMinimum {
     function testGetRankRevertNotFound() public {
         insert(tree, 100);
 
-        vm.expectRevert("Key not found");
-        getRank(tree, 999);
+        vm.expectRevert(KeyNotFound.selector);
+        this.exposed_getRank(999);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -187,8 +192,8 @@ contract OrderStatisticsTreeTest is Test, IzitOSTreeMinimum {
     }
 
     function testRemoveRevertNotFound() public {
-        vm.expectRevert("Key not found");
-        remove(tree, 999);
+        vm.expectRevert(KeyNotFound.selector);
+        this.exposed_remove(999);
     }
 
     /*//////////////////////////////////////////////////////////////

@@ -19,6 +19,7 @@ interface IPool is OrderTypes {
     error InvalidOracle();
     error InvalidStatus();
     error NotAuthorized();
+    error InvalidOrder();
 
     // Events
     event IOC();
@@ -136,6 +137,25 @@ interface IPool is OrderTypes {
     function getLastPrice() external view returns (uint256);
 
     function setEngine(address _engine) external;
+
+    /**
+     * @notice Get pool description and last price
+     */
+    function getPoolInfo() external view returns (string memory description, uint256 lastPrice);
+
+    /**
+     * @notice Set authorized Router address (owner only)
+     */
+    function setRouter(address _router) external;
+
+    /**
+     * @notice Create a new order on behalf of a trader (Router only)
+     * @param trader The actual trader; vault margin is pulled from their balance and NFT minted to them
+     * @param margin Margin amount
+     * @param pOrder Order details
+     * @return newPosId The created position ID
+     */
+    function newOrderFor(address trader, uint256 margin, PoolOrder memory pOrder) external returns (OrderId newPosId);
 
     /**
      * @notice Get liquidation engine address

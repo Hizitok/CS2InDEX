@@ -5,69 +5,109 @@ import {OrderTypes} from "./OrderTypes.sol";
 
 /**
  * @title IRouter
- * @notice Interface for the CS2InDEX Router contract
- * @dev Router provides convenient functions for interacting with multiple pools
- *      and performing batch operations
+ * @notice Interface for the CS2InDEX Router — single entry-point for all user trading.
  */
 interface IRouter is OrderTypes {
+
+    // ── Structs ───────────────────────────────────────────────────────────────
+
+    struct PositionView {
+        address  pool;
+        OrderId  posId;
+        Position pos;
+        uint256  oraclePrice;
+    }
+
+    struct MarketInfo {
+        address pool;
+        string  description;
+        uint256 lastPrice;
+        uint256 oraclePrice;
+        uint256 ask1Price;
+        uint256 bid1Price;
+        uint256 fundingIdx;
+        uint256 maxLeverage;
+    }
+
+    // ── Events ────────────────────────────────────────────────────────────────
+
+    event Deposited(address indexed user, uint256 amount);
+    event Withdrawn(address indexed user, uint256 amount);
+    event PositionOpened(address indexed pool, address indexed trader, OrderId posId);
+    event PositionClosed(address indexed pool, address indexed trader, OrderId orderId);
+    event OrderCancelled(address indexed pool, address indexed trader, OrderId orderId);
+
+    // ── Vault Helpers ─────────────────────────────────────────────────────────
+
+    /// @notice Deposit USDC into vault. Requires USDC.approve(router, amount).
+    function deposit(uint256 amount) external;
+
+    /// @notice Withdraw USDC from vault to caller.
+    function withdraw(uint256 amount) external;
+
+    // ── Core Trading ──────────────────────────────────────────────────────────
+
     /**
-     * @notice Deposit USDC to vault and open a position in one transaction
-     * @param pool Pool address
-     * @param depositAmount Amount of USDC to deposit
-     * @param order Order details
-     * @return orderId The created order/position ID
+     * @notice Deposit USDC and open a position in one transaction.
+     * @dev Requires USDC.approve(router, depositAmount).
      */
-    function depositAndOpenPosition(
+    function depositAndOpen(
         address pool,
         uint256 depositAmount,
+        uint256 margin,
         PoolOrder calldata order
-    ) external returns (OrderId orderId);
+    ) external returns (OrderId posId);
 
     /**
-     * @notice Close position and withdraw all available balance
-     * @param pool Pool address
-     * @param positionId Position to close
-     * @param closeOrder Close order details
-     * @return withdrawn Amount withdrawn
+     * @notice Open a position using existing vault balance.
      */
-    function closePositionAndWithdraw(
+    function open(
         address pool,
-        OrderId positionId,
+        uint256 margin,
+        PoolOrder calldata order
+    ) external returns (OrderId posId);
+
+    /**
+     * @notice Close an open position.
+     * @dev Requires positionNFT.setApprovalForAll(router, true).
+     */
+    function close(
+        address pool,
+        OrderId orderId,
         PoolOrder calldata closeOrder
-    ) external returns (uint256 withdrawn);
+    ) external;
 
     /**
-     * @notice Emergency close all positions for a user
-     * @param user User address
-     * @param pools Array of pool addresses
-     * @return closed Number of positions closed
+     * @notice Cancel a pending order and reclaim margin.
+     * @dev Requires positionNFT.setApprovalForAll(router, true).
      */
-    function emergencyCloseAllPositions(address user, address[] calldata pools)
-        external
-        returns (uint256 closed);
+    function cancel(address pool, OrderId orderId) external returns (bool);
 
-    /**
-     * @notice Get the vault address
-     * @return Address of the vault contract
-     */
-    function vault() external view returns (address);
+    // ── Batch Operations ──────────────────────────────────────────────────────
 
-    /**
-     * @notice Get the factory address
-     * @return Address of the factory contract
-     */
+    function batchOpen(
+        address[]   calldata pools,
+        uint256[]   calldata margins,
+        PoolOrder[] calldata orders
+    ) external returns (OrderId[] memory posIds);
+
+    function batchClose(
+        address[]   calldata pools,
+        OrderId[]   calldata orderIds,
+        PoolOrder[] calldata closeOrders
+    ) external;
+
+    // ── View ──────────────────────────────────────────────────────────────────
+
+    function getPortfolio(address user) external view returns (PositionView[] memory);
+    function getAllMarkets()             external view returns (MarketInfo[]   memory);
+    function getMarketInfo(address pool) external view returns (MarketInfo    memory);
+    function getBalance(address user)    external view returns (uint256);
+
+    // ── Immutables ────────────────────────────────────────────────────────────
+
     function factory() external view returns (address);
-
-    /**
-     * @notice Check if a pool is valid and active
-     * @param pool Pool address
-     * @return isValid True if pool is valid and active
-     */
-    function isValidPool(address pool) external view returns (bool isValid);
-
-    // Events
-    event PositionOpened(address indexed user, address indexed pool, OrderId indexed orderId, uint256 size);
-    event PositionClosed(address indexed user, address indexed pool, OrderId indexed orderId, int256 pnl);
-    event BatchOperationCompleted(address indexed user, uint256 successCount, uint256 totalCount);
-    event EmergencyCloseExecuted(address indexed user, uint256 positionsClosed);
+    function vault()   external view returns (address);
+    function nft()     external view returns (address);
+    function usdc()    external view returns (address);
 }

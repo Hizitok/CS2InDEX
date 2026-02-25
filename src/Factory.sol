@@ -6,6 +6,7 @@ import {Vault} from "./Vault.sol";
 import {positionNFT} from "./PositionNFT.sol";
 import {IndexOracle} from "./IndexOracle.sol";
 import {PoolDeployer} from "./libraries/PoolDeployer.sol";
+import {EngineDeployer} from "./libraries/EngineDeployer.sol";
 import {IFactory} from "./interfaces/IFactory.sol";
 import {IOracle} from "./interfaces/IOracle.sol";
 import {IPool} from "./interfaces/IPool.sol";
@@ -82,7 +83,7 @@ contract CS2InDEXFactory is Ownable, IFactory {
         if(_pools[poolAddr].pool != address(0)) revert InvalidStatus();
 
         // Deploy LiquidationEngine via library
-        engineAddr = PoolDeployer.deployEngine(poolAddr, nft, oracle, pxDecimals);
+        engineAddr = EngineDeployer.deployEngine(poolAddr, nft, oracle, pxDecimals);
 
         // Wire permissions
         positionNFT(nft).setPool(poolAddr, true);
@@ -157,11 +158,11 @@ contract CS2InDEXFactory is Ownable, IFactory {
         returns (
             PoolInfo memory info,
             uint256 lastPrice,
-            uint256 oraclePrice_
+            uint256 oraclePrice
         )
     {
         info = _pools[pool];
         lastPrice = IPool(info.pool).getLastPrice();
-        oraclePrice_ = IOracle(oracle).oraclePrice(info.pool);
+        oraclePrice = IOracle(oracle).oraclePrice(info.pool);
     }
 }

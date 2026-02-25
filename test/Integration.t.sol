@@ -558,9 +558,9 @@ contract IntegrationTest is Test, OrderTypes {
         console.log("  Second trade executed at 103 USDC");
 
         // Check accumulated data
-        (uint64 sampleCount, uint128 avgVTWAP) = oracle.getPoolsStats(address(pool));
+        (uint64 lastTradeTs, uint128 avgVTWAP) = oracle.getPoolsStats(address(pool));
         console.log("\nAccumulated data:");
-        console.log("  Sample count:", sampleCount);
+        console.log("  Last trade timestamp:", lastTradeTs);
         console.log("  Avg VTWAP:", avgVTWAP / 1e6);
 
         // Step 4: Calculate funding rate before settlement
@@ -595,12 +595,13 @@ contract IntegrationTest is Test, OrderTypes {
         // Verify funding index changed
         assertTrue(newFundingIdx != initialFundingIdx, "Funding index should have changed");
 
-        // Step 8: Verify stats are reset after settlement
+        // Step 8: Verify accumulators are reset after settlement
         console.log("\nStep 8: Verifying stats reset...");
-        (uint64 newSampleCount, uint128 newAvgVTWAP) = oracle.getPoolsStats(address(pool));
-        console.log("  New sample count:", newSampleCount);
+        (uint64 newLastTradeTs, uint128 newAvgVTWAP) = oracle.getPoolsStats(address(pool));
+        console.log("  New last trade timestamp:", newLastTradeTs);
         console.log("  New avg VTWAP:", newAvgVTWAP);
-        assertEq(newSampleCount, 0, "Sample count should reset to 0");
+        // After settlement lastTradeTime is reset to block.timestamp (non-zero)
+        assertTrue(newLastTradeTs > 0, "lastTradeTime should be set after settlement");
         assertEq(newAvgVTWAP, 0, "Avg VTWAP should reset to 0");
 
         // Step 9: Open new position after funding rate change

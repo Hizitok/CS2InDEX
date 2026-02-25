@@ -12,6 +12,13 @@ interface IVault {
     function internalTransfer(address from, address to, uint256 amount) external;
 
     /**
+     * @notice Deposit tokens into the vault on behalf of a beneficiary
+     * @param beneficiary Address to credit
+     * @param amount Amount to deposit
+     */
+    function depositFor(address beneficiary, uint256 amount) external;
+
+    /**
      * @notice Deposit tokens into the vault
      * @param amount Amount to deposit
      */

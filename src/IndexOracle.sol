@@ -26,6 +26,11 @@ contract IndexOracle is Ownable, IOracle {
     int128 public fundingRateCap = 200;    // 2% = 200 bp
     int128 public fundingRateFloor = -200; // -2% = -200 bp
 
+    // Maximum time interval counted per trade in the weighted average.
+    // A single price point that persists longer than this is capped, preventing one
+    // stale or illiquid period from monopolising the entire period's weight.
+    uint256 public constant MAX_TRADE_INTERVAL = 1 hours;
+
     /**
      * Premium Index Calculation Formula:
      *
@@ -40,13 +45,13 @@ contract IndexOracle is Ownable, IOracle {
     */
 
     struct PoolFundingData {
-        // EVM Slot 0
-        uint64 lastFundingTime;    // Last Funding time of this pool
-        uint64 sampleCount;        // Number of samples in current period
-        uint128 cumWeight;          // Cumulative weight sum
-        // EVM Slot 1
-        uint128 cumWeightedPremium;  // Cumulative weighted premium index
-        uint128 cumWeightedOracle; // cumulative weighted oracle price
+        // EVM Slot 0  (64 + 64 + 128 = 256 bits)
+        uint64 lastFundingTime;    // Timestamp of last funding settlement for this pool
+        uint64 lastTradeTime;      // Timestamp of last on-chain trade (for inter-trade Δt)
+        uint128 cumWeight;         // Cumulative Σ min(Δt, cap) × size
+        // EVM Slot 1  (128 + 128 = 256 bits)
+        uint128 cumWeightedPremium;  // Cumulative Σ price × weight
+        uint128 cumWeightedOracle;   // Cumulative Σ oraclePrice × weight
     }
 
     mapping(address => bool) private authorizedPools;
@@ -72,6 +77,10 @@ contract IndexOracle is Ownable, IOracle {
      */
     function addPool(address pool) external onlyOwner {
         authorizedPools[pool] = true;
+        // Initialise per-pool timestamps so the first trade gets a zero Δt
+        // instead of the full time elapsed since the contract was deployed.
+        poolData[pool].lastFundingTime = uint64(block.timestamp);
+        poolData[pool].lastTradeTime   = uint64(block.timestamp);
     }
 
     /**
@@ -98,24 +107,48 @@ contract IndexOracle is Ownable, IOracle {
      */
     function updatePoolInfo(uint256 size, uint256 price) external onlyPool(msg.sender) {
 
-        uint256 timeWeight = block.timestamp - lastFundingTime;
-        uint128 VTWeight = uint128(timeWeight * uint128(size));
         PoolFundingData memory data = poolData[msg.sender];
- 
-        // we use Mixed Volume-weighted and Time-weighted avg Price
-        // VTWAP
-        // Avg Price = \frac{\sum P_i * T_i * V_i}{ \sum T_i * V_i}
-        // If oracle price was updated in last 2 min,
-        // we assume that oracle can be used for premium price calculation 
-        if( block.timestamp - updateTime[msg.sender] <= 120 ) {
-            data.sampleCount++;
-            data.cumWeight += VTWeight;
-            data.cumWeightedPremium += uint128(price) * VTWeight;
-            data.cumWeightedOracle += uint128(oraclePrice[msg.sender]) * VTWeight;
+
+        // Inter-trade time weight: how long the previous price persisted before this trade.
+        // Capped at MAX_TRADE_INTERVAL so one very long illiquid gap can't dominate the
+        // whole settlement period's weight.
+        uint256 dt = block.timestamp - data.lastTradeTime;
+        uint256 cappedDt = dt > MAX_TRADE_INTERVAL ? MAX_TRADE_INTERVAL : dt;
+
+        // Always advance lastTradeTime so the next trade measures from now.
+        data.lastTradeTime = uint64(block.timestamp);
+
+        // Only accumulate into the premium index when the oracle price is fresh
+        // (updated within the last 2 minutes). Stale oracle → skip accumulation
+        // but still advance lastTradeTime so we don't carry a stale gap forward.
+        if (block.timestamp - updateTime[msg.sender] <= 120) {
+            // weight = min(Δt, cap) × size  — computed in uint256 to avoid overflow
+            uint256 vtWeight256 = cappedDt * size;
+            uint128 VTWeight = vtWeight256 > type(uint128).max
+                ? type(uint128).max
+                : uint128(vtWeight256);
+
+            // Weighted products in uint256 before capping to uint128 accumulator fields
+            uint256 weightedPremium = uint256(price)                   * uint256(VTWeight);
+            uint256 weightedOracle  = uint256(oraclePrice[msg.sender]) * uint256(VTWeight);
+
+            uint256 newCumWeight = uint256(data.cumWeight) + uint256(VTWeight);
+            data.cumWeight = newCumWeight > type(uint128).max
+                ? type(uint128).max
+                : uint128(newCumWeight);
+
+            uint256 newCumPremium = uint256(data.cumWeightedPremium) + weightedPremium;
+            data.cumWeightedPremium = newCumPremium > type(uint128).max
+                ? type(uint128).max
+                : uint128(newCumPremium);
+
+            uint256 newCumOracle = uint256(data.cumWeightedOracle) + weightedOracle;
+            data.cumWeightedOracle = newCumOracle > type(uint128).max
+                ? type(uint128).max
+                : uint128(newCumOracle);
         }
 
         poolData[msg.sender] = data;
-
     }
 
     /**
@@ -162,7 +195,21 @@ contract IndexOracle is Ownable, IOracle {
 
         avgVT = getVTWAPIndex(pool);
         avgVTOracle = getVTWAPOracle(pool);
-        avgVTWAPDiff = int128(avgVT - avgVTOracle) * BASIS_POINT / int128(avgVTOracle);
+
+        // Guard: if no samples collected (oracle price stale or no trades), treat diff as 0.
+        // Without this guard: avgVTOracle==0 causes div/0; avgVT < avgVTOracle causes
+        // uint128 underflow and revert (bearish markets where VTWAP < index price).
+        if (avgVTOracle == 0) {
+            avgVTWAPDiff = 0;
+        } else {
+            // Use int256 intermediate to safely handle signed subtraction and overflow.
+            int256 diff256 = int256(uint256(avgVT)) - int256(uint256(avgVTOracle));
+            int256 raw = diff256 * int256(uint256(uint128(BASIS_POINT))) / int256(uint256(avgVTOracle));
+            // Clamp to int128 range before storing (extreme outliers are bounded anyway by outer clamp)
+            if (raw > type(int128).max) raw = type(int128).max;
+            if (raw < type(int128).min) raw = type(int128).min;
+            avgVTWAPDiff = int128(raw);
+        }
 
         // Step 2: Calculate interest rate based on settlement period
         interestRate = calculateInterestRate();
@@ -188,7 +235,11 @@ contract IndexOracle is Ownable, IOracle {
      * @param pool The pool address
      */
     function applyFundingRate(address pool) external onlyOwner onlyPool(pool){
-        require(block.timestamp >= lastFundingTime + settlementPeriod, "Settlement period not reached");
+        // Use per-pool lastFundingTime so each pool has an independent settlement period.
+        // Previously the global `lastFundingTime` was used, which meant applying funding
+        // to one pool would reset the timer for ALL other pools.
+        uint64 poolLastTime = poolData[pool].lastFundingTime;
+        require(block.timestamp >= poolLastTime + settlementPeriod, "Settlement period not reached");
 
         (int256 avgVTWAPRate, int256 interestRate, int256 fundingRate) = calculateFundingRate(pool);
 
@@ -209,9 +260,11 @@ contract IndexOracle is Ownable, IOracle {
         // Update pool's funding index
         IPool(pool).updateFundingIndex(newFundingIdx);
 
-        // Reset accumulators for next period
+        // Reset accumulators for next period; restore both timestamps so the next period
+        // starts cleanly without carrying a stale gap from the previous period.
         delete poolData[pool];
-        lastFundingTime = block.timestamp;
+        poolData[pool].lastFundingTime = uint64(block.timestamp);
+        poolData[pool].lastTradeTime   = uint64(block.timestamp);
 
         emit FundingRateCalculated(pool, fundingRate, avgVTWAPRate, interestRate);
     }
@@ -243,16 +296,16 @@ contract IndexOracle is Ownable, IOracle {
     /**
      * @notice Get premium data statistics
      * @param pool The pool address
-     * @return sampleCount Number of samples collected
-     * @return avgVTWAPIndex Average premium index
+     * @return lastTradeTime Timestamp of the most recent on-chain trade
+     * @return avgVTWAPIndex Current period's volume-time weighted average premium index
      */
     function getPoolsStats(address pool)
         external
         view
-        returns (uint64 sampleCount, uint128 avgVTWAPIndex)
+        returns (uint64 lastTradeTime, uint128 avgVTWAPIndex)
     {
         PoolFundingData memory data = poolData[pool];
-        return (data.sampleCount, getVTWAPIndex(pool));
+        return (data.lastTradeTime, getVTWAPIndex(pool));
     }
 
     /**

@@ -22,6 +22,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     address public positionNFT;
     address public vault;
     address public engine;
+    address public router;
 
     uint256 public fundingIdx = 1 << 63;
     uint256 public lastPrice;
@@ -65,6 +66,11 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         _;
     }
 
+    modifier onlyRouter() {
+        if( msg.sender != router ) revert NotAuthorized();
+        _;
+    }
+
     function _less(uint256 ptrA, uint256 ptrB)
         internal
         view
@@ -77,28 +83,53 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
 
     // ------------ Interfaces Function Part ------------ //
 
-    function newOrder(uint256 margin, PoolOrder memory pOrder) 
-        public 
-        returns (OrderId newPosId) 
+    function newOrder(uint256 margin, PoolOrder memory pOrder)
+        public
+        returns (OrderId newPosId)
     {
+        return _newOrderInternal(msg.sender, margin, pOrder);
+    }
+
+    /**
+     * @notice Create a new order on behalf of a trader (Router only)
+     * @dev Margin is pulled from trader's vault balance; NFT is minted to trader.
+     *      Only the authorized Router may call this to prevent unauthorized position creation.
+     */
+    function newOrderFor(address trader, uint256 margin, PoolOrder memory pOrder)
+        external
+        onlyRouter
+        returns (OrderId newPosId)
+    {
+        return _newOrderInternal(trader, margin, pOrder);
+    }
+
+    function _newOrderInternal(address trader, uint256 margin, PoolOrder memory pOrder)
+        internal
+        returns (OrderId newPosId)
+    {
+        // Basic sanity: reject zero-size and zero-margin orders
+        if (pOrder.size == 0) revert InvalidOrder();
+        if (margin == 0) revert InvalidOrder();
+
         // Price sanity check (skip for market orders)
         if (pOrder.oType != orderType.Market) {
             if (pOrder.price > lastPrice * 2) revert PxOverflow();
             if (pOrder.price < lastPrice / 2) revert PxUnderflow();
         }
 
-        // Leverage check: position value (in currency units) must not exceed margin * maxLeverage
-        // Position value = size * price / 10**pxDecimals
-        // Max value = margin * maxLeverage / 100
-        if ((pOrder.size * pOrder.price) / (10 ** pxDecimals) > margin * maxLeverage / 100)
+        // Leverage check: position value must not exceed margin * maxLeverage.
+        // For market orders, pOrder.price is 0 (price is unknown at submission), so use
+        // oraclePrice as the reference price to prevent unlimited-size market orders.
+        uint256 refPrice = (pOrder.oType == orderType.Market) ? oraclePrice : pOrder.price;
+        if (refPrice > 0 && (pOrder.size * refPrice) / (10 ** pxDecimals) > margin * maxLeverage / 100)
             revert LeverageOverflow();
 
-        // Transfer margin from Vault contract to pool
-        IVault(vault).internalTransfer(msg.sender, address(this), margin);
-        // Then create position NFT for manage and query
-        newPosId = IPosition(positionNFT).newNFT(pOrder, msg.sender, margin);
+        // Transfer margin from trader's vault balance to pool
+        IVault(vault).internalTransfer(trader, address(this), margin);
+        // Mint position NFT to the actual trader
+        newPosId = IPosition(positionNFT).newNFT(pOrder, trader, margin);
 
-        // update order info 
+        // update order info
         OBPx[newPosId] = pOrder.price;
         OBSize[newPosId] = pOrder.size;
 
@@ -129,7 +160,12 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
             // Save cancelled size before modifying
             uint256 cancelledSize = pos.pendingSize;
 
-            remove( isSellOrder ?_ask_OB:_bid_OB, OrderId.unwrap(orderId));
+            // Only remove from tree if it was inserted (Limit/IOC orders are in tree;
+            // Market orders are never inserted so skip tree removal to avoid revert).
+            Tree storage ob = isSellOrder ? _ask_OB : _bid_OB;
+            if (contains(ob, OrderId.unwrap(orderId))) {
+                remove(ob, OrderId.unwrap(orderId));
+            }
             pos.pendingSize = 0;
 
             // Calculate proportional refund for cancelled portion
@@ -173,9 +209,10 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
             IEngine(engine).registerPosition(orderId);
         }
 
-        // Refund margin to caller (only for pendingOpen with unfilled portion)
+        // Refund margin to NFT owner (not msg.sender, so Router-routed cancels work correctly)
         if (refundAmount > 0) {
-            IVault(vault).internalTransfer(address(this), msg.sender, refundAmount);
+            address posOwner = IPosition(positionNFT).ownerOf(OrderId.unwrap(orderId));
+            IVault(vault).internalTransfer(address(this), posOwner, refundAmount);
         }
 
         emit OrderCancelled(orderId, msg.sender);
@@ -345,6 +382,14 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     }
 
     /**
+     * @notice Set the authorized Router address (owner only)
+     * @dev Only one router is active at a time. Set to address(0) to disable.
+     */
+    function setRouter(address _router) external onlyOwner {
+        router = _router;
+    }
+
+    /**
      * @notice Force liquidate a position (engine only)
      * @dev No auth/price sanity checks. Places limit order at bankruptcy price.
      *      The order goes through normal matching — fills if price is favorable,
@@ -414,13 +459,18 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
             }
         } 
 
-        // CHECK Fill or Kiil Order
+        // CHECK Fill or Kill Order
         if ( pOrder.oType == orderType.FOK && _size > 0) {
             revert FOK();
-        } 
+        }
         // CHECK Immediately or Cancelled
         if ( pOrder.oType == orderType.IOC && _size > 0) {
-            cancelOrder(takerId); 
+            cancelOrder(takerId);
+        }
+        // Market orders: cancel any unfilled remainder so margin is never trapped.
+        // Market orders are never inserted into the tree, so cancelOrder skips tree removal.
+        if ( pOrder.oType == orderType.Market && _size > 0) {
+            cancelOrder(takerId);
         }
 
         // Making new orders

@@ -168,6 +168,9 @@ contract positionNFT is OrderTypes, PosERC721 {
         require(!_settled[id], "Already settled");
 
         _settled[id] = true;
+        // Advance Position struct status to settled so getPosition() reflects final state.
+        // Without this, status stays `closed` forever and callers can't distinguish the two.
+        _positions[id].status = posStatus.settled;
 
         emit PositionSettled(id, _owners[id]);
     }

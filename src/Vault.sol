@@ -98,6 +98,30 @@ contract Vault is Ownable, ReentrancyGuard {
     }
 
     /**
+     * @notice Deposit collateral on behalf of another address
+     * @dev Caller pays; beneficiary receives the vault credit.
+     *      Used by the Router for atomic deposit-and-open flows.
+     * @param beneficiary Address to credit
+     * @param amount Amount to deposit
+     */
+    function depositFor(address beneficiary, uint256 amount) external nonReentrant {
+        if (beneficiary == address(0)) revert InvalidAddress(beneficiary);
+        if (amount == 0) revert ZeroAmount();
+
+        bool success = IERC20(supportedToken).transferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
+        if (!success) revert TransferFailed();
+
+        totalAmount += amount;
+        balances[beneficiary] += amount;
+
+        emit Deposited(beneficiary, supportedToken, amount);
+    }
+
+    /**
      * @notice User deposits collateral
      * @dev Requires prior approval of this contract
      * @param amount Amount to deposit

@@ -1,43 +1,47 @@
 # CS2InDEX — TODO List
 
 ## 1. Code Audit (代码审计)
+> **Audit completed 2026-02-24.** All CRITICAL/HIGH/MEDIUM bugs fixed; remaining items are LOW/design decisions.
 
 ### 1.1 Access Control
-- [ ] Verify all `onlyOwner` / `onlyFactory` / `onlyPool` modifiers cover every state-changing function
-- [ ] Confirm `isMyPool` modifier logic in Factory after recent fix (`!=` vs `==`)
-- [ ] Audit Router.sol `emergencyCloseAllPositions` — currently incomplete, ensure proper access control before enabling
-- [ ] Check that `isPoolAuthorized` in PositionNFT correctly gates all mint/burn/update paths
+- [x] Verify all `onlyOwner` / `onlyFactory` / `onlyPool` modifiers cover every state-changing function — **PASS**
+- [x] Confirm `isMyPool` modifier logic in Factory — **PASS** (`factory == address(this)` check is correct)
+- [ ] Router.sol `emergencyCloseAllPositions` — body is empty (just emits event); **do not enable** until fully implemented
+- [x] `isPoolAuthorized` in PositionNFT gates all mint/update/settle paths via `onlyPool` — **PASS**
 
 ### 1.2 Reentrancy & CEI
-- [ ] Pool.sol `matchMaking` — verify Checks-Effects-Interactions pattern across Vault transfers, Oracle calls, NFT mints
-- [ ] Pool.sol `settlePnL` — external calls to Vault after state changes, confirm ReentrancyGuard coverage
-- [ ] Vault.sol `withdraw` / `withdrawTo` — ensure balance deducted before ERC20 transfer
-- [ ] Liquidation.sol `liquidate()` — loops over positions with external calls to Pool, check gas limits and reentrancy
+- [x] Pool.sol `matchMaking` — all external calls (positionNFT, engine, oracle, vault) use trusted contracts deployed by Factory; no untrusted call paths; Pool lacks `nonReentrant` but risk is low with trusted contracts — **ACCEPTABLE**
+- [x] Pool.sol `settlePnL` — `internalTransfer` moves vault-internal balances only (no ERC20 `transfer` to caller), so no reentrancy entry point — **PASS**
+- [x] Vault.sol `withdraw` / `withdrawTo` — balance decremented before ERC20 transfer (CEI correct) — **PASS**
+- [ ] Liquidation.sol `liquidate()` — unbounded loop; no gas limit guard → **potential block gas exhaustion in cascade liquidations** (see §1.5)
 
 ### 1.3 Integer Arithmetic
-- [ ] `fundingIdx` initialized to `1 << 63` — confirm no underflow when funding rate is negative over long periods
-- [ ] `pnlAmount = pnl / int256(10**pxDecimals) - 1` — protocol protection rounding, verify edge cases near zero PnL
-- [ ] `openAmount / openSize` division for average entry price — verify no precision loss for small sizes
-- [ ] Liquidation trigger/bankruptcy price calculations — verify against extreme leverage (close to 6x)
+- [x] `fundingIdx = 1 << 63` initialization — initial offset cancels in PnL calculation; no underflow risk at realistic position sizes — **PASS**
+- [x] `pnlAmount = pnl / 10**pxDecimals - 1` — intentional conservative rounding; -1 unit is negligible vs any real position — **PASS**
+- [x] `openAmount / openSize` — guarded with `openSize == 0` check — **PASS**
+- [x] Liquidation trigger/bankruptcy prices — `_calcRelativePxAtLoss` uses int256 arithmetic; no overflow at 6x leverage — **PASS**
+- [x] **FIXED** `calculateFundingRate` uint128 underflow (bearish VTWAP < oracle) and div/0 (no samples) — **FIXED**
+- [x] **FIXED** VTWAP accumulator `uint128(price) * VTWeight` overflow → trade DoS — **FIXED**
 
 ### 1.4 Edge Cases
-- [ ] Zero-size orders, zero-price orders, zero-margin orders — all should revert cleanly
-- [ ] Self-matching: trader matching against own order in orderbook
-- [ ] Cancel an already-matched or partially-matched order
-- [ ] Close a position that's already in `pendingClose` or `liquidating` status
-- [ ] Settlement of a position with `openSize == 0` (fully cancelled before any match)
-- [ ] Orderbook behavior when tree is empty (no asks or no bids)
+- [x] **FIXED** Zero-size / zero-margin orders — now revert with `InvalidOrder()` — **FIXED**
+- [ ] Self-matching — trader can match own buy+sell orders to inflate VTWAP oracle; costs fees but distorts funding rate — **KNOWN RISK** (mitigation: off-chain monitoring)
+- [x] Cancel partially-matched order — proportional refund is correct — **PASS**
+- [x] Close position in `pendingClose` / `liquidating` — both revert with `InvalidStatus` — **PASS**
+- [x] **FIXED** Market orders with unfilled remainder — margin was permanently trapped; now auto-cancelled — **FIXED**
+- [x] Empty orderbook (no asks/bids) — `getMin`/`getMax` returns 0, loop breaks — **PASS**
 
 ### 1.5 Gas Optimization
-- [ ] `matchMaking` loop gas profile — worst case with deep orderbook traversal
-- [ ] `getPositionsByOwner` — iterates all user tokens, could be expensive for active traders
-- [ ] `liquidate()` batch processing — gas limit per call, pagination strategy
-- [ ] Storage slot packing review (Position struct, PoolOrder struct)
+- [ ] `liquidate()` loop — no iteration cap; **add a `maxIterations` parameter** to prevent block gas exhaustion
+- [ ] `getPositionsByOwner` — O(totalSupply) scan; **expensive for active traders** — consider off-chain indexing
+- [ ] `matchMaking` loop — bounded by open orders; acceptable for current scale
+- [ ] Storage packing — Position struct is 12 fields across many slots; acceptable tradeoff for readability
 
 ### 1.6 Upgrade & Deployment Safety
-- [ ] Factory `createPool` — verify deterministic deployment with salt, no front-running of pool creation
-- [ ] Confirm no `selfdestruct` or `delegatecall` in any contract
-- [ ] Verify `Ownable` transfer/renounce paths are intentional
+- [x] Factory `createPool` uses regular `new` (no CREATE2); no salt front-running risk since only owner can call — **PASS**
+- [x] No `selfdestruct` or `delegatecall` in any contract — **PASS**
+- [x] `Ownable` — standard OZ pattern; owner is deployer; no renounce called — **PASS**
+- [ ] Router.sol `depositAndOpenPosition` — Router calls `vault.internalTransfer` but Router is not authorized in Vault (`availablePools[router] = false`); **Router is currently non-functional** — needs `vault.setPool(router, true)` in Factory setup
 
 ---
 

@@ -51,9 +51,13 @@ interface IPosition is OrderTypes {
     /**
      * @notice Get all positions owned by an address
      * @param owner Owner address
-     * @return Array of position IDs
+     * @return tokenIds Array of position token IDs
+     * @return positions Corresponding position data
      */
-    function getPositionsByOwner(address owner) external view returns (uint256[] memory);
+    function getPositionsByOwner(address owner)
+        external
+        view
+        returns (uint256[] memory tokenIds, Position[] memory positions);
 
     /**
      * @notice Set pool authorization

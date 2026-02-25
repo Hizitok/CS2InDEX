@@ -1,118 +1,248 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./interfaces/IRouter.sol";
-import "./interfaces/IPool.sol";
-import {IVault} from"./interfaces/IVault.sol";
-import "./interfaces/IPosition.sol";
-import "./interfaces/IFactory.sol";
-import "./interfaces/IERC20.sol";
-import "./libraries/ReentrancyGuard.sol";
+import {IRouter}   from "./interfaces/IRouter.sol";
+import {IFactory}  from "./interfaces/IFactory.sol";
+import {IPool}     from "./interfaces/IPool.sol";
+import {IVault}    from "./interfaces/IVault.sol";
+import {IPosition} from "./interfaces/IPosition.sol";
+import {IERC20}    from "./interfaces/IERC20.sol";
+import {ReentrancyGuard} from "./libraries/ReentrancyGuard.sol";
 
 /**
- * @title Router
- * @notice Router contract for convenient interaction with CS2InDEX protocol
- * @dev Provides batch operations and combined functions for better UX
+ * @title CS2InDEXRouter
+ * @notice Single entry-point for all user-facing trading operations.
+ *
+ * Design invariants:
+ *  - Router holds NO funds and NO vault balance at rest.
+ *  - Positions are always owned by the user (msg.sender), not the Router.
+ *  - Margin is pulled from the user's vault balance via Pool.newOrderFor().
+ *
+ * User prerequisites:
+ *  - deposit / depositAndOpen : USDC.approve(router, amount)
+ *  - close / cancel / batchClose : positionNFT.setApprovalForAll(router, true)
+ *
+ * Pool prerequisite (set by owner/factory after deployment):
+ *  - pool.setRouter(router)
  */
-contract Router is IRouter, ReentrancyGuard {
-    address public immutable vault;
-    address public immutable factory;
-    IERC20 public immutable currency;
+contract CS2InDEXRouter is IRouter, ReentrancyGuard {
 
-    constructor(address _vault, address _factory, address _currency) {
-        require(_vault != address(0), "Invalid vault");
-        require(_factory != address(0), "Invalid factory");
-        require(_currency != address(0), "Invalid currency");
+    // ── Immutables ────────────────────────────────────────────────────────────
+
+    address public immutable override factory;
+    address public immutable override vault;
+    address public immutable override nft;
+    address public immutable override usdc;
+
+    // ── Errors ────────────────────────────────────────────────────────────────
+
+    error InvalidPool();
+    error ArrayMismatch();
+    error ZeroAmount();
+
+    // ── Constructor ───────────────────────────────────────────────────────────
+
+    /**
+     * @param _factory Factory address — all other addresses are derived from it.
+     */
+    constructor(address _factory) {
+        require(_factory != address(0), "Router: zero factory");
+        factory = _factory;
+
+        address _vault = IFactory(_factory).vault();
+        address _nft   = IFactory(_factory).nft();
+
+        // Resolve USDC from Vault.supportedToken()
+        (bool ok, bytes memory data) = _vault.staticcall(
+            abi.encodeWithSignature("supportedToken()")
+        );
+        require(ok && data.length == 32, "Router: cannot resolve USDC");
+        address _usdc = abi.decode(data, (address));
 
         vault = _vault;
-        factory = _factory;
-        currency = IERC20(_currency);
+        nft   = _nft;
+        usdc  = _usdc;
     }
 
-    /**
-     * @notice Deposit Token to vault and open position in one tx
-     */
-    function depositAndOpenPosition(
+    // ── Modifiers ─────────────────────────────────────────────────────────────
+
+    modifier validPool(address pool) {
+        if (!IFactory(factory).isValidPool(pool)) revert InvalidPool();
+        _;
+    }
+
+    // ── Vault Helpers ─────────────────────────────────────────────────────────
+
+    /// @inheritdoc IRouter
+    function deposit(uint256 amount) external nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        _pullAndDeposit(msg.sender, amount);
+        emit Deposited(msg.sender, amount);
+    }
+
+    /// @inheritdoc IRouter
+    function withdraw(uint256 amount) external nonReentrant {
+        if (amount == 0) revert ZeroAmount();
+        IVault(vault).withdrawTo(msg.sender, amount);
+        emit Withdrawn(msg.sender, amount);
+    }
+
+    // ── Core Trading ──────────────────────────────────────────────────────────
+
+    /// @inheritdoc IRouter
+    function depositAndOpen(
         address pool,
         uint256 depositAmount,
+        uint256 margin,
         PoolOrder calldata order
-    ) external nonReentrant returns (OrderId orderId) {
-        require(isValidPool(pool), "Invalid pool");
-        require(depositAmount > 0, "Invalid deposit amount");
-
-        // Transfer Token from user to this contract
-        currency.transferFrom(msg.sender, address(this), depositAmount);
-
-        // Approve vault to spend Token
-        currency.approve( vault, depositAmount);
-
-        // Deposit to vault
-        IVault(vault).deposit(depositAmount);
-
-        // Transfer deposited balance to user's vault account
-        IVault(vault).internalTransfer(address(this), msg.sender, depositAmount);
-
-        // Open position
-        orderId = IPool(pool).newOrder(depositAmount, order);
-
-        emit PositionOpened(msg.sender, pool, orderId, order.size);
+    ) external nonReentrant validPool(pool) returns (OrderId posId) {
+        if (depositAmount == 0 || margin == 0) revert ZeroAmount();
+        _pullAndDeposit(msg.sender, depositAmount);
+        posId = IPool(pool).newOrderFor(msg.sender, margin, order);
+        emit PositionOpened(pool, msg.sender, posId);
     }
 
-    /**
-     * @notice Close position and withdraw all available balance
-     */
-    function closePositionAndWithdraw(
+    /// @inheritdoc IRouter
+    function open(
         address pool,
-        OrderId positionId,
+        uint256 margin,
+        PoolOrder calldata order
+    ) external nonReentrant validPool(pool) returns (OrderId posId) {
+        if (margin == 0) revert ZeroAmount();
+        posId = IPool(pool).newOrderFor(msg.sender, margin, order);
+        emit PositionOpened(pool, msg.sender, posId);
+    }
+
+    /// @inheritdoc IRouter
+    /// @dev Pool.closePosition uses isAuthorized(orderId, msg.sender=router) — needs NFT approval.
+    ///      PnL settlement is triggered automatically by matchMaking and goes to ownerOf (user).
+    function close(
+        address pool,
+        OrderId orderId,
         PoolOrder calldata closeOrder
-    ) external nonReentrant returns (uint256 withdrawn) {
-        require(isValidPool(pool), "Invalid pool");
-
-        // Close position
-        IPool(pool).closePosition(positionId, closeOrder);
-
-        // Settle PnL
-        IPool(pool).settlePnL(positionId);
-
-        // Get available balance
-        uint256 available = IVault(vault).balanceOf(msg.sender);
-
-        // Withdraw all available
-        if (available > 0) {
-            IVault(vault).withdraw(available);
-            withdrawn = available;
-        }
-
-        emit PositionClosed(msg.sender, pool, positionId, 0);
+    ) external nonReentrant validPool(pool) {
+        IPool(pool).closePosition(orderId, closeOrder);
+        emit PositionClosed(pool, msg.sender, orderId);
     }
 
-    /**
-     * @notice Emergency close all positions
-     */
-    function emergencyCloseAllPositions(address user, address[] calldata pools)
+    /// @inheritdoc IRouter
+    /// @dev Margin refund goes to NFT owner (user), not Router, due to the fix in Pool.cancelOrder.
+    function cancel(
+        address pool,
+        OrderId orderId
+    ) external nonReentrant validPool(pool) returns (bool) {
+        bool ok = IPool(pool).cancelOrder(orderId);
+        emit OrderCancelled(pool, msg.sender, orderId);
+        return ok;
+    }
+
+    // ── Batch Operations ──────────────────────────────────────────────────────
+
+    /// @inheritdoc IRouter
+    function batchOpen(
+        address[]   calldata pools,
+        uint256[]   calldata margins,
+        PoolOrder[] calldata orders
+    ) external nonReentrant returns (OrderId[] memory posIds) {
+        uint256 n = pools.length;
+        if (n != margins.length || n != orders.length) revert ArrayMismatch();
+
+        posIds = new OrderId[](n);
+        for (uint256 i = 0; i < n; i++) {
+            if (!IFactory(factory).isValidPool(pools[i])) revert InvalidPool();
+            if (margins[i] == 0) revert ZeroAmount();
+            posIds[i] = IPool(pools[i]).newOrderFor(msg.sender, margins[i], orders[i]);
+            emit PositionOpened(pools[i], msg.sender, posIds[i]);
+        }
+    }
+
+    /// @inheritdoc IRouter
+    function batchClose(
+        address[]   calldata pools,
+        OrderId[]   calldata orderIds,
+        PoolOrder[] calldata closeOrders
+    ) external nonReentrant {
+        uint256 n = pools.length;
+        if (n != orderIds.length || n != closeOrders.length) revert ArrayMismatch();
+
+        for (uint256 i = 0; i < n; i++) {
+            if (!IFactory(factory).isValidPool(pools[i])) revert InvalidPool();
+            IPool(pools[i]).closePosition(orderIds[i], closeOrders[i]);
+            emit PositionClosed(pools[i], msg.sender, orderIds[i]);
+        }
+    }
+
+    // ── View: Portfolio ───────────────────────────────────────────────────────
+
+    /// @inheritdoc IRouter
+    function getPortfolio(address user)
         external
-        nonReentrant
-        returns (uint256 closed)
+        view
+        returns (PositionView[] memory views)
     {
-        require(msg.sender == user, "Can only close own positions");
+        (uint256[] memory ids, Position[] memory positions) =
+            IPosition(nft).getPositionsByOwner(user);
 
-        for (uint256 i = 0; i < pools.length; i++) {
-            if (!isValidPool(pools[i])) continue;
-
-            // Full implementation requires position enumeration
+        views = new PositionView[](ids.length);
+        for (uint256 i = 0; i < ids.length; i++) {
+            address pool = positions[i].pool;
+            views[i] = PositionView({
+                pool:        pool,
+                posId:       OrderId.wrap(ids[i]),
+                pos:         positions[i],
+                oraclePrice: IPool(pool).oraclePrice()
+            });
         }
-
-        emit EmergencyCloseExecuted(user, closed);
-        return closed;
     }
 
-    /**
-     * @notice Check if pool is valid
-     */
-    function isValidPool(address pool) public view returns (bool) {
-        return IFactory(factory).isValidPool(pool);
+    // ── View: Markets ─────────────────────────────────────────────────────────
+
+    /// @inheritdoc IRouter
+    function getAllMarkets() external view returns (MarketInfo[] memory markets) {
+        address[] memory pools = IFactory(factory).getAllPools();
+        markets = new MarketInfo[](pools.length);
+        for (uint256 i = 0; i < pools.length; i++) {
+            markets[i] = _marketInfo(pools[i]);
+        }
+    }
+
+    /// @inheritdoc IRouter
+    function getMarketInfo(address pool)
+        external
+        view
+        validPool(pool)
+        returns (MarketInfo memory)
+    {
+        return _marketInfo(pool);
+    }
+
+    /// @inheritdoc IRouter
+    function getBalance(address user) external view returns (uint256) {
+        return IVault(vault).balanceOf(user);
+    }
+
+    // ── Internal Helpers ──────────────────────────────────────────────────────
+
+    /// @dev Pull USDC from user → Router → Vault.depositFor, crediting the user's vault balance.
+    function _pullAndDeposit(address user, uint256 amount) internal {
+        bool ok = IERC20(usdc).transferFrom(user, address(this), amount);
+        require(ok, "Router: USDC pull failed");
+        IERC20(usdc).approve(vault, amount);
+        IVault(vault).depositFor(user, amount);
+    }
+
+    function _marketInfo(address pool) internal view returns (MarketInfo memory info) {
+        (uint256 lastPrice, uint256 ask1, uint256 bid1) = IPool(pool).getOrderbookInfo();
+        (string memory desc,) = IPool(pool).getPoolInfo();
+        info = MarketInfo({
+            pool:        pool,
+            description: desc,
+            lastPrice:   lastPrice,
+            oraclePrice: IPool(pool).oraclePrice(),
+            ask1Price:   ask1,
+            bid1Price:   bid1,
+            fundingIdx:  IPool(pool).fundingIdx(),
+            maxLeverage: IPool(pool).maxLeverage()
+        });
     }
 }
-
-
-
