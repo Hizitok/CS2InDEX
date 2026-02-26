@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import {IERC20} from "./interfaces/IERC20.sol";
 import {Ownable} from "./libraries/Ownable.sol";
+import {Pausable} from "./libraries/Pausable.sol";
 import {ReentrancyGuard} from "./libraries/ReentrancyGuard.sol";
 
 /**
@@ -10,7 +11,7 @@ import {ReentrancyGuard} from "./libraries/ReentrancyGuard.sol";
  * @notice Central vault for managing user collateral and internal transfers
  * @dev Supports single token (USDC/USDT/etc.) for simplified margin management
  */
-contract Vault is Ownable, ReentrancyGuard {
+contract Vault is Ownable, Pausable, ReentrancyGuard {
 
     // Immutable supported token
     address public immutable supportedToken;
@@ -68,6 +69,17 @@ contract Vault is Ownable, ReentrancyGuard {
     // ======== Admin functions ========
 
     /**
+     * @notice Pause new deposits (owner only)
+     * @dev Withdrawals remain unaffected so users can always recover funds.
+     */
+    function pause() external onlyOwner { _pause(); }
+
+    /**
+     * @notice Resume deposits (owner only)
+     */
+    function unpause() external onlyOwner { _unpause(); }
+
+    /**
      * @notice Add or remove authorized pool
      * @param pool Pool address
      * @param allowed Whether pool is authorized
@@ -104,7 +116,7 @@ contract Vault is Ownable, ReentrancyGuard {
      * @param beneficiary Address to credit
      * @param amount Amount to deposit
      */
-    function depositFor(address beneficiary, uint256 amount) external nonReentrant {
+    function depositFor(address beneficiary, uint256 amount) external whenNotPaused nonReentrant {
         if (beneficiary == address(0)) revert InvalidAddress(beneficiary);
         if (amount == 0) revert ZeroAmount();
 
@@ -126,7 +138,7 @@ contract Vault is Ownable, ReentrancyGuard {
      * @dev Requires prior approval of this contract
      * @param amount Amount to deposit
      */
-    function deposit(uint256 amount) external nonReentrant {
+    function deposit(uint256 amount) external whenNotPaused nonReentrant {
         if (amount == 0) revert ZeroAmount();
 
         // Transfer tokens from user
@@ -203,7 +215,23 @@ contract Vault is Ownable, ReentrancyGuard {
         emit Withdrawn(msg.sender, token, amount);
     }
 
-    // ======== Pool functions (authorized operators only) ========
+    // ======== Pool / Router functions (authorized operators only) ========
+
+    /**
+     * @notice Withdraw on behalf of a user (Router only)
+     * @dev Router is authorized in availablePools so it can deduct from user's
+     *      balance and send funds to the specified recipient.
+     * @param user Account to debit
+     * @param to Recipient address
+     * @param amount Amount to withdraw
+     */
+    function withdrawFor(address user, address to, uint256 amount)
+        external
+        onlyPool
+        nonReentrant
+    {
+        internalWithdraw(user, to, amount);
+    }
 
     /**
      * @notice Internal transfer between accounts

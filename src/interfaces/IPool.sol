@@ -33,6 +33,19 @@ interface IPool is OrderTypes {
     event FeesCollected(address indexed collector, uint256 amount);
     event OraclePriceUpdated(uint256 oldPrice, uint256 newPrice);
 
+    // ── Emergency Pause ───────────────────────────────────────────────────────
+
+    /** @notice Pause new order creation (owner only) */
+    function pause() external;
+
+    /** @notice Resume new order creation (owner only) */
+    function unpause() external;
+
+    /** @notice Returns true when the pool is paused */
+    function paused() external view returns (bool);
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
      * @notice Create a new order
      * @param margin margin amount
@@ -84,7 +97,7 @@ interface IPool is OrderTypes {
 
     /**
      * @notice Get maximum leverage allowed
-     * @return Max leverage (600 = 6x)
+     * @return Max leverage (1000 = 10x)
      */
     function maxLeverage() external view returns (uint256);
 
@@ -170,5 +183,28 @@ interface IPool is OrderTypes {
      * @param pOrder Closing order (Limit at bankruptcy price)
      */
     function forceLiquidate(OrderId orderId, PoolOrder memory pOrder) external;
+
+    /**
+     * @notice Emergency close all listed positions at oracle price (owner only)
+     * @dev Pauses the pool, then force-closes each position ID provided.
+     *      Position IDs must be supplied by an off-chain indexer.
+     * @param positionIds Open position IDs to force-close
+     */
+    function emergencyCloseAllPositions(OrderId[] calldata positionIds) external;
+
+    /**
+     * @notice Get order book depth for depth chart display
+     * @param nLevels Maximum number of distinct price levels per side
+     * @return askPrices Sell-side price levels (ascending, best ask first)
+     * @return askSizes  Total open size at each ask price level
+     * @return bidPrices Buy-side price levels (descending, best bid first)
+     * @return bidSizes  Total open size at each bid price level
+     */
+    function getDepth(uint256 nLevels) external view returns (
+        uint256[] memory askPrices,
+        uint256[] memory askSizes,
+        uint256[] memory bidPrices,
+        uint256[] memory bidSizes
+    );
 
 }

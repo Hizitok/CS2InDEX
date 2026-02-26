@@ -3,6 +3,19 @@ pragma solidity ^0.8.20;
 
 interface IVault {
 
+    // ── Emergency Pause ───────────────────────────────────────────────────────
+
+    /** @notice Pause new deposits (owner only) */
+    function pause() external;
+
+    /** @notice Resume deposits (owner only) */
+    function unpause() external;
+
+    /** @notice Returns true when the vault is paused */
+    function paused() external view returns (bool);
+
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
      * @notice Transfer tokens internally between accounts
      * @param from Source address
@@ -31,6 +44,14 @@ interface IVault {
     function withdraw(uint256 amount) external;
 
     function withdrawTo(address to, uint256 amount) external;
+
+    /**
+     * @notice Withdraw on behalf of a user (Router only — caller must be authorized)
+     * @param user Account to debit
+     * @param to Recipient address
+     * @param amount Amount to withdraw
+     */
+    function withdrawFor(address user, address to, uint256 amount) external;
 
     /**
      * @notice Get user's total balance in the vault

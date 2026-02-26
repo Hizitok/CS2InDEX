@@ -682,7 +682,7 @@ contract PoolTest is Test, OrderTypes {
     }
 
     function testMaxLeverage() public view {
-        assertEq(pool.maxLeverage(), 600, "Max leverage should be 6x (600/100)");
+        assertEq(pool.maxLeverage(), 1000, "Max leverage should be 10x (1000/100)");
     }
 
     function testOracle() public view {
@@ -695,6 +695,284 @@ contract PoolTest is Test, OrderTypes {
 
     function testPositionNFT() public view {
         assertEq(pool.positionNFT(), address(positionNFT), "Should return position NFT address");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        DEPTH CHART TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testGetDepth_Empty() public view {
+        (
+            uint256[] memory askPrices,
+            uint256[] memory askSizes,
+            uint256[] memory bidPrices,
+            uint256[] memory bidSizes
+        ) = pool.getDepth(5);
+
+        assertEq(askPrices.length, 5, "Ask array length should be nLevels");
+        assertEq(bidPrices.length, 5, "Bid array length should be nLevels");
+        for (uint256 i = 0; i < 5; i++) {
+            assertEq(askPrices[i], 0, "Empty book: ask price should be 0");
+            assertEq(askSizes[i],  0, "Empty book: ask size should be 0");
+            assertEq(bidPrices[i], 0, "Empty book: bid price should be 0");
+            assertEq(bidSizes[i],  0, "Empty book: bid size should be 0");
+        }
+    }
+
+    function testGetDepth_MultiLevel() public {
+        // --- Asks (sell orders, isSell=true, price > lastPrice so no match) ---
+        // Level 1: 51k — two orders summing to 3e6
+        vm.prank(user2);
+        pool.newOrder(20000e6, PoolOrder({ isSell: true, oType: orderType.Limit, size: 2e6, price: 51000e6 }));
+        vm.prank(user3);
+        pool.newOrder(10000e6, PoolOrder({ isSell: true, oType: orderType.Limit, size: 1e6, price: 51000e6 }));
+        // Level 2: 52k — one order of 2e6
+        vm.prank(user2);
+        pool.newOrder(20000e6, PoolOrder({ isSell: true, oType: orderType.Limit, size: 2e6, price: 52000e6 }));
+
+        // --- Bids (buy orders, isSell=false, price < lastPrice so no match) ---
+        // Level 1: 49k — two orders summing to 3e6
+        vm.prank(user1);
+        pool.newOrder(20000e6, PoolOrder({ isSell: false, oType: orderType.Limit, size: 2e6, price: 49000e6 }));
+        vm.prank(user1);
+        pool.newOrder(10000e6, PoolOrder({ isSell: false, oType: orderType.Limit, size: 1e6, price: 49000e6 }));
+        // Level 2: 48k — one order of 2e6
+        vm.prank(user1);
+        pool.newOrder(20000e6, PoolOrder({ isSell: false, oType: orderType.Limit, size: 2e6, price: 48000e6 }));
+
+        (
+            uint256[] memory askPrices,
+            uint256[] memory askSizes,
+            uint256[] memory bidPrices,
+            uint256[] memory bidSizes
+        ) = pool.getDepth(5);
+
+        // Asks: best ask first (ascending)
+        assertEq(askPrices[0], 51000e6, "Ask level 0 price should be 51k");
+        assertEq(askSizes[0],  3e6,     "Ask level 0 size: 2e6+1e6=3e6");
+        assertEq(askPrices[1], 52000e6, "Ask level 1 price should be 52k");
+        assertEq(askSizes[1],  2e6,     "Ask level 1 size should be 2e6");
+        assertEq(askPrices[2], 0,       "Ask level 2 should be empty");
+        assertEq(askSizes[2],  0,       "Ask level 2 size should be 0");
+
+        // Bids: best bid first (descending)
+        assertEq(bidPrices[0], 49000e6, "Bid level 0 price should be 49k");
+        assertEq(bidSizes[0],  3e6,     "Bid level 0 size: 2e6+1e6=3e6");
+        assertEq(bidPrices[1], 48000e6, "Bid level 1 price should be 48k");
+        assertEq(bidSizes[1],  2e6,     "Bid level 1 size should be 2e6");
+        assertEq(bidPrices[2], 0,       "Bid level 2 should be empty");
+        assertEq(bidSizes[2],  0,       "Bid level 2 size should be 0");
+    }
+
+    function testGetDepth_NLevelsCap() public {
+        // Place 3 distinct ask price levels
+        vm.prank(user2);
+        pool.newOrder(10000e6, PoolOrder({ isSell: true, oType: orderType.Limit, size: 1e6, price: 51000e6 }));
+        vm.prank(user2);
+        pool.newOrder(10000e6, PoolOrder({ isSell: true, oType: orderType.Limit, size: 1e6, price: 52000e6 }));
+        vm.prank(user2);
+        pool.newOrder(10000e6, PoolOrder({ isSell: true, oType: orderType.Limit, size: 1e6, price: 53000e6 }));
+
+        // Request only 2 levels — should cap at level 51k and 52k
+        (
+            uint256[] memory askPrices,
+            uint256[] memory askSizes,
+            uint256[] memory bidPrices,
+            uint256[] memory bidSizes
+        ) = pool.getDepth(2);
+
+        assertEq(askPrices.length, 2, "Should return exactly nLevels entries");
+        assertEq(askPrices[0], 51000e6, "Level 0 should be best ask");
+        assertEq(askPrices[1], 52000e6, "Level 1 should be second best ask");
+        assertEq(bidPrices.length, 2, "Bid array length should equal nLevels");
+        // No bids placed
+        assertEq(bidPrices[0], 0, "No bids: should be 0");
+        assertEq(bidSizes[0],  0, "No bids: size should be 0");
+
+        // Verify third level (53k) is NOT returned even though it exists
+        // (nLevels=2 caps output)
+        assertEq(askSizes[1], 1e6, "Only first two levels visible");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        PAUSABLE TESTS
+    //////////////////////////////////////////////////////////////*/
+
+    function testPause_BlocksNewOrder() public {
+        pool.pause();
+        assertTrue(pool.paused(), "Pool should be paused");
+
+        vm.prank(user1);
+        vm.expectRevert(abi.encodeWithSignature("EnforcedPause()"));
+        pool.newOrder(10000e6, PoolOrder({
+            isSell: false,
+            oType: orderType.Limit,
+            size: 1e6,
+            price: 49000e6
+        }));
+    }
+
+    function testPause_AllowsCancel() public {
+        // Place limit order while unpaused
+        vm.prank(user1);
+        OrderId orderId = pool.newOrder(10000e6, PoolOrder({
+            isSell: false,
+            oType: orderType.Limit,
+            size: 1e6,
+            price: 49000e6
+        }));
+
+        // Pause — cancel must still work so user can recover margin
+        pool.pause();
+
+        vm.prank(user1);
+        bool success = pool.cancelOrder(orderId);
+        assertTrue(success, "Cancel should succeed while paused");
+    }
+
+    function testUnpause_RestoresNewOrder() public {
+        pool.pause();
+        pool.unpause();
+        assertFalse(pool.paused(), "Pool should be unpaused");
+
+        // Placing an order should succeed again
+        vm.prank(user1);
+        OrderId orderId = pool.newOrder(10000e6, PoolOrder({
+            isSell: false,
+            oType: orderType.Limit,
+            size: 1e6,
+            price: 49000e6
+        }));
+        assertTrue(OrderId.unwrap(orderId) != 0, "Order should be created after unpause");
+    }
+
+    function testPause_RevertNotOwner() public {
+        vm.prank(user1);
+        vm.expectRevert(); // Ownable: caller is not the owner
+        pool.pause();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // setRouter / newOrderFor
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function testSetRouter() public {
+        address routerAddr = address(0xBEEF);
+        pool.setRouter(routerAddr);
+        assertEq(pool.router(), routerAddr, "router should be updated");
+    }
+
+    function testSetRouter_RevertNotOwner() public {
+        vm.prank(user1);
+        vm.expectRevert();
+        pool.setRouter(address(0xBEEF));
+    }
+
+    function testNewOrderFor_Success() public {
+        address routerAddr = address(0xBEEF);
+        pool.setRouter(routerAddr);
+        // setUp already funded user1 with 100000e6
+
+        vm.prank(routerAddr);
+        OrderId posId = pool.newOrderFor(user1, 10000e6, PoolOrder({
+            isSell: false,
+            oType:  orderType.Limit,
+            size:   1e6,
+            price:  49000e6
+        }));
+
+        assertTrue(OrderId.unwrap(posId) != 0, "posId must be non-zero");
+        // NFT must be owned by the actual trader, not the router
+        assertEq(positionNFT.ownerOf(OrderId.unwrap(posId)), user1, "NFT owner should be trader");
+        // Margin deducted from trader's vault balance
+        assertLt(vault.balances(user1), 100000e6, "Margin should be locked");
+    }
+
+    function testNewOrderFor_RevertNotRouter() public {
+        // router is address(0) by default — any call from non-router reverts
+        vault.mint(user1, 100000e6);
+        vm.prank(user1);
+        vm.expectRevert();
+        pool.newOrderFor(user1, 10000e6, PoolOrder({
+            isSell: false,
+            oType:  orderType.Limit,
+            size:   1e6,
+            price:  49000e6
+        }));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // emergencyCloseAllPositions
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// @dev Helper: open a matched long/short pair using setUp-funded balances
+    function _openMatchedPair(uint256 fillPrice)
+        internal
+        returns (OrderId longId, OrderId shortId)
+    {
+        vm.prank(user1);
+        longId = pool.newOrder(20000e6, PoolOrder({
+            isSell: false, oType: orderType.Limit, size: 1e6, price: fillPrice
+        }));
+
+        vm.prank(user2);
+        shortId = pool.newOrder(20000e6, PoolOrder({
+            isSell: true, oType: orderType.Limit, size: 1e6, price: fillPrice
+        }));
+        // After matching both are posStatus.open
+    }
+
+    function testEmergencyCloseAllPositions_PausesAndCloses() public {
+        uint256 fillPrice = INITIAL_PRICE; // 50 000e6
+
+        (OrderId longId,) = _openMatchedPair(fillPrice);
+
+        // Place a counter-party buy order so the emergency sell can fill
+        vault.mint(user3, 100000e6);
+        vm.prank(user3);
+        pool.newOrder(20000e6, PoolOrder({
+            isSell: false, oType: orderType.Limit, size: 1e6, price: fillPrice
+        }));
+
+        // Emergency close the long position
+        OrderId[] memory toClose = new OrderId[](1);
+        toClose[0] = longId;
+        pool.emergencyCloseAllPositions(toClose);
+
+        // Pool must be paused
+        assertTrue(pool.paused(), "Pool should be paused after emergency close");
+
+        // Long position must be closed or settled
+        Position memory pos = positionNFT.getPosition(longId);
+        assertTrue(
+            pos.status == posStatus.closed || pos.status == posStatus.settled,
+            "Long position should be closed/settled"
+        );
+    }
+
+    function testEmergencyCloseAllPositions_SkipsNonOpen() public {
+        // ID 0 returns zero-struct (pendingOpen) — must be skipped, not reverted
+        OrderId[] memory toClose = new OrderId[](1);
+        toClose[0] = OrderId.wrap(0);
+
+        pool.emergencyCloseAllPositions(toClose); // must not revert
+
+        assertTrue(pool.paused(), "Pool should still be paused even if IDs were skipped");
+    }
+
+    function testEmergencyCloseAllPositions_RevertNotOwner() public {
+        OrderId[] memory toClose = new OrderId[](0);
+        vm.prank(user1);
+        vm.expectRevert();
+        pool.emergencyCloseAllPositions(toClose);
+    }
+
+    function testForceLiquidateAsOwner_RevertNotSelf() public {
+        vm.prank(user1);
+        vm.expectRevert("Only self");
+        pool.forceLiquidateAsOwner(OrderId.wrap(1), PoolOrder({
+            isSell: true, oType: orderType.Limit, size: 1e6, price: INITIAL_PRICE
+        }));
     }
 }
 
@@ -734,9 +1012,20 @@ contract MockVault is IVault {
         balances[to] += amount;
     }
 
+    function withdrawFor(address user, address to, uint256 amount) external {
+        require(balances[user] >= amount, "Insufficient balance");
+        balances[user] -= amount;
+        balances[to] += amount;
+    }
+
     function balanceOf(address user) external view returns (uint256) {
         return balances[user];
     }
+
+    // Pause stubs — MockVault is never actually paused in tests
+    function pause() external {}
+    function unpause() external {}
+    function paused() external pure returns (bool) { return false; }
 }
 
 contract MockPosition is IPosition {

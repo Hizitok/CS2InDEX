@@ -19,7 +19,7 @@ CS2InDEX 是一个完全链上的永续合约交易所，允许交易者对 CS2 
 
 ### 1.1 CS2 皮肤市场概述
 
-CS2（Counter-Strike 2）拥有超过 3500 万活跃玩家，其游戏内皮肤（skin）市场是全球规模最大的虚拟道具市场之一，估计总市值超过 **500 亿美元**。Steam 平台官方市场每日交易量达数百万美元，第三方平台（如 Buff163、SkinFlow.gg、EsportFire.com）的交易量更是数倍于此。
+CS2（Counter-Strike 2）拥有超过 3500 万活跃玩家，其游戏内皮肤（skin）市场是全球规模最大的虚拟道具市场之一，估计总市值超过 **50 亿美元**。Steam 平台官方市场每日交易量达数百万美元，第三方平台（如 Buff163、SkinFlow.gg、EsportFire.com）的交易量更是数倍于此。
 
 皮肤价格受多重因素驱动：职业赛事热度、皮肤稀缺性（Float 值、贴纸、纹理）、Steam 季节性促销以及玩家社区情绪。价格波动率高，短期内单件皮肤涨跌幅可超过 50%。
 
@@ -338,13 +338,13 @@ triggerPrice_short = openPrice × (1 + (1 - maintenanceMarginRatio) / leverage)
 
 参数：
 - `maintenanceMarginRatio` = 20%（维持保证金率）
-- `leverage` = 用户选择的杠杆倍数（最大 6x）
+- `leverage` = 用户选择的杠杆倍数（最大 10x）
 - `openPrice` = 仓位开仓成交均价
 
-**示例（6x 杠杆多头，开仓价 100 USDC）：**
+**示例（10x 杠杆多头，开仓价 100 USDC）：**
 
 ```
-triggerPrice = 100 × (1 - (1 - 0.20) / 6) = 100 × (1 - 0.1333) = 86.67 USDC
+triggerPrice = 100 × (1 - (1 - 0.20) / 10) = 100 × (1 - 0.08) = 92.00 USDC
 ```
 
 ### 6.3 破产价格（Bankruptcy Price）
@@ -588,7 +588,7 @@ VTWAP 权重 `min(Δt, 3600) × size` 意味着：
 |------|----|------|
 | `MAKERFEE` | `3000` (3000/1e6 = 0.3%) | Maker 手续费率 |
 | `TAKERFEE` | `5000` (5000/1e6 = 0.5%) | Taker 手续费率 |
-| `maxLeverage` | `600` (600/100 = 6x) | 最大杠杆倍数 |
+| `maxLeverage` | `1000` (1000/100 = 10x) | 最大杠杆倍数 |
 | `maintenanceMarginRatio` | `20%` | 维持保证金率 |
 | `fundingPeriod` | `28800` 秒 (8 小时) | 资金费率结算周期 |
 | `maxFundingRate` | `200 bp` (2%) | 单周期资金费率上限 |

@@ -27,7 +27,7 @@ const INDEX_ASSET = {
   pool: '0x0000000000000000000000000000000000000000' // Placeholder
 };
 
-const MAX_LEVERAGE = 6; // 最大杠杆倍数
+const MAX_LEVERAGE = 10; // 最大杠杆倍数
 
 /**
  * 交易界面组件
@@ -285,7 +285,7 @@ export function TradingInterface() {
           <input
             type="range"
             min="1"
-            max="6"
+            max="10"
             step="1"
             value={leverage}
             onChange={(e) => handleLeverageChange(parseInt(e.target.value))}
@@ -298,6 +298,10 @@ export function TradingInterface() {
             <span>4x</span>
             <span>5x</span>
             <span>6x</span>
+            <span>7x</span>
+            <span>8x</span>
+            <span>9x</span>
+            <span>10x</span>
           </div>
         </div>
 

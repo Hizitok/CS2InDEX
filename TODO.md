@@ -6,7 +6,7 @@
 ### 1.1 Access Control
 - [x] Verify all `onlyOwner` / `onlyFactory` / `onlyPool` modifiers cover every state-changing function — **PASS**
 - [x] Confirm `isMyPool` modifier logic in Factory — **PASS** (`factory == address(this)` check is correct)
-- [ ] Router.sol `emergencyCloseAllPositions` — body is empty (just emits event); **do not enable** until fully implemented
+- [x] Router.sol `emergencyCloseAllPositions` — removed in Router rewrite; new Router does not expose this function — **RESOLVED**
 - [x] `isPoolAuthorized` in PositionNFT gates all mint/update/settle paths via `onlyPool` — **PASS**
 
 ### 1.2 Reentrancy & CEI
@@ -19,7 +19,7 @@
 - [x] `fundingIdx = 1 << 63` initialization — initial offset cancels in PnL calculation; no underflow risk at realistic position sizes — **PASS**
 - [x] `pnlAmount = pnl / 10**pxDecimals - 1` — intentional conservative rounding; -1 unit is negligible vs any real position — **PASS**
 - [x] `openAmount / openSize` — guarded with `openSize == 0` check — **PASS**
-- [x] Liquidation trigger/bankruptcy prices — `_calcRelativePxAtLoss` uses int256 arithmetic; no overflow at 6x leverage — **PASS**
+- [x] Liquidation trigger/bankruptcy prices — `_calcRelativePxAtLoss` uses int256 arithmetic; no overflow at 10x leverage — **PASS**
 - [x] **FIXED** `calculateFundingRate` uint128 underflow (bearish VTWAP < oracle) and div/0 (no samples) — **FIXED**
 - [x] **FIXED** VTWAP accumulator `uint128(price) * VTWeight` overflow → trade DoS — **FIXED**
 
@@ -41,7 +41,7 @@
 - [x] Factory `createPool` uses regular `new` (no CREATE2); no salt front-running risk since only owner can call — **PASS**
 - [x] No `selfdestruct` or `delegatecall` in any contract — **PASS**
 - [x] `Ownable` — standard OZ pattern; owner is deployer; no renounce called — **PASS**
-- [ ] Router.sol `depositAndOpenPosition` — Router calls `vault.internalTransfer` but Router is not authorized in Vault (`availablePools[router] = false`); **Router is currently non-functional** — needs `vault.setPool(router, true)` in Factory setup
+- [x] Router.sol authorization — Router now uses `vault.depositFor(user)` instead of `vault.internalTransfer`; no Vault authorization needed — **FIXED**
 
 ---
 

@@ -20,9 +20,6 @@ contract positionNFT is OrderTypes, PosERC721 {
     // Authorized pools (can mint and update positions)
     mapping(address => bool) private _authorizedPools;
 
-    // Position settled status (prevents double settlement)
-    mapping(uint256 => bool) private _settled;
-
     // Events
     event PositionCreated(
         uint256 indexed tokenId,
@@ -165,11 +162,8 @@ contract positionNFT is OrderTypes, PosERC721 {
         uint256 id = OrderId.unwrap(oID);
         require(_positions[id].positionID != 0, "Position does not exist");
         require(_positions[id].pool == msg.sender, "Not position pool");
-        require(!_settled[id], "Already settled");
+        require(_positions[id].status != posStatus.settled, "Already settled");
 
-        _settled[id] = true;
-        // Advance Position struct status to settled so getPosition() reflects final state.
-        // Without this, status stays `closed` forever and callers can't distinguish the two.
         _positions[id].status = posStatus.settled;
 
         emit PositionSettled(id, _owners[id]);
@@ -193,7 +187,7 @@ contract positionNFT is OrderTypes, PosERC721 {
      */
     function isSettled(OrderId oID) external view returns (bool) {
         uint256 id = OrderId.unwrap(oID);
-        return _settled[id];
+        return _positions[id].status == posStatus.settled;
     }
 
     /**
@@ -212,20 +206,6 @@ contract positionNFT is OrderTypes, PosERC721 {
      */
     function totalSupply() external view returns (uint256) {
         return tokenCount;
-    }
-
-    /**
-     * @notice Get position details for a token ID
-     * @param tokenId Token ID
-     * @return Position data
-     */
-    function getPositionByTokenId(uint256 tokenId)
-        external
-        view
-        returns (Position memory)
-    {
-        require(_positions[tokenId].positionID != 0, "Position does not exist");
-        return _positions[tokenId];
     }
 
     /**

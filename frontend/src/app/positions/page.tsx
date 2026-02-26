@@ -5,6 +5,7 @@ import { PositionsList } from '@/components/positions/PositionsList';
 import { TradingInterface } from '@/components/trading/TradingInterface';
 import { VaultBalance } from '@/components/vault/VaultBalance';
 import { PriceChart } from '@/components/market/PriceChart';
+import { OrderbookDepth } from '@/components/market/OrderbookDepth';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function PositionsPage() {
@@ -53,6 +54,7 @@ export default function PositionsPage() {
                 {/* Right Column: Positions List (Wider) */}
                 <div className="lg:col-span-8 order-1 lg:order-2">
                     <PriceChart />
+                    <OrderbookDepth demo />
                     <PositionsList />
                 </div>
             </div>

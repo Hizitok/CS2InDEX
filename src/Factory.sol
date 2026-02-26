@@ -38,6 +38,7 @@ contract CS2InDEXFactory is Ownable, IFactory {
     address public vault;
     address public oracle;
     address public nft;
+    address public router;
 
     // pool address => PoolInfo
     mapping(address => PoolInfo) internal _pools;
@@ -90,6 +91,10 @@ contract CS2InDEXFactory is Ownable, IFactory {
         Vault(vault).setPool(poolAddr, true);
         IOracle(oracle).addPool(poolAddr);
         IPool(poolAddr).setEngine(engineAddr);
+        // Wire router if already registered
+        if (router != address(0)) {
+            IPool(poolAddr).setRouter(router);
+        }
 
         // Store pool info
         _pools[poolAddr] = PoolInfo({
@@ -106,6 +111,31 @@ contract CS2InDEXFactory is Ownable, IFactory {
     }
 
     // ======== Admin ======== //
+
+    /**
+     * @notice Register the Router and authorize it in Vault + all existing pools.
+     * @dev Call this once after deploying the Router. New pools created afterward
+     *      are wired automatically inside createPool().
+     * @param _router Deployed Router address
+     */
+    function setRouter(address _router) external onlyOwner {
+        require(_router != address(0), "Factory: zero router");
+
+        // Deauthorize old router if one was set
+        if (router != address(0)) {
+            Vault(vault).setPool(router, false);
+        }
+
+        router = _router;
+
+        // Authorize in Vault (needed for withdrawFor)
+        Vault(vault).setPool(_router, true);
+
+        // Wire to all existing pools
+        for (uint256 i = 0; i < allPools.length; i++) {
+            IPool(allPools[i]).setRouter(_router);
+        }
+    }
 
     /**
      * @notice Update oracle price for a pool

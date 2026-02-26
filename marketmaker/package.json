@@ -1,0 +1,20 @@
+{
+  "name": "cs2index-marketmaker",
+  "version": "1.0.0",
+  "description": "Grid + Martingale market maker for CS2InDEX",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "viem": "^2.0.0",
+    "dotenv": "^16.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.0.0",
+    "@types/node": "^20.0.0"
+  }
+}

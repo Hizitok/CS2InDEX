@@ -152,7 +152,7 @@ contract PosERC721 is Ownable, IERC721 {
     }
 
     function _authorized(uint256 tokenId, address user)
-        public 
+        internal
         view
         returns (bool authorized)
     {

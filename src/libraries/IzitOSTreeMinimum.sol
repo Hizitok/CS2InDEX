@@ -236,6 +236,54 @@ abstract contract IzitOSTreeMinimum {
         return tree.root == NIL;
     }
 
+    /**
+     * @notice Get the in-order successor key (next larger key in sorted order)
+     * @param tree The tree storage
+     * @param key Current key
+     * @return The next key in ascending order, or 0 if none exists
+     */
+    function nextKey(Tree storage tree, uint256 key) internal view returns (uint256) {
+        uint128 nodeId = uint128(tree.keyToNodeId[key]);
+        if (nodeId == NIL) return 0;
+
+        // If right subtree exists, successor is its leftmost node
+        if (tree.nodes[nodeId].right != NIL) {
+            return tree.nodes[minimum(tree, tree.nodes[nodeId].right)].key;
+        }
+
+        // Otherwise walk up until we come from a left child
+        uint128 parent = tree.nodes[nodeId].parent;
+        while (parent != NIL && nodeId == tree.nodes[parent].right) {
+            nodeId = parent;
+            parent = tree.nodes[parent].parent;
+        }
+        return parent == NIL ? 0 : tree.nodes[parent].key;
+    }
+
+    /**
+     * @notice Get the in-order predecessor key (next smaller key in sorted order)
+     * @param tree The tree storage
+     * @param key Current key
+     * @return The previous key in ascending order, or 0 if none exists
+     */
+    function prevKey(Tree storage tree, uint256 key) internal view returns (uint256) {
+        uint128 nodeId = uint128(tree.keyToNodeId[key]);
+        if (nodeId == NIL) return 0;
+
+        // If left subtree exists, predecessor is its rightmost node
+        if (tree.nodes[nodeId].left != NIL) {
+            return tree.nodes[maximum(tree, tree.nodes[nodeId].left)].key;
+        }
+
+        // Otherwise walk up until we come from a right child
+        uint128 parent = tree.nodes[nodeId].parent;
+        while (parent != NIL && nodeId == tree.nodes[parent].left) {
+            nodeId = parent;
+            parent = tree.nodes[parent].parent;
+        }
+        return parent == NIL ? 0 : tree.nodes[parent].key;
+    }
+
     /*//////////////////////////////////////////////////////////////
                         INTERNAL HELPER FUNCTIONS
     //////////////////////////////////////////////////////////////*/

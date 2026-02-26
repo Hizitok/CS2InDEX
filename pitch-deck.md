@@ -12,7 +12,7 @@
 _Trade the CS2 Market. On-Chain. 24/7._
 
 - Perpetual futures on CS2 item indices
-- Up to 6x leverage, long & short
+- Up to 10x leverage, long & short
 - Fully on-chain order book, no custody
 
 ---
@@ -175,7 +175,7 @@ SOM — 首年目标（单一协议占领 SAM 的 5-10%）
 **Step 2: 选择市场和方向**
 - 选 CS2 Global Index
 - Long（看涨）或 Short（看跌）
-- 选择杠杆（1x-6x）和订单类型（Limit / Market）
+- 选择杠杆（1x-10x）和订单类型（Limit / Market）
 
 **Step 3: 持有 Position NFT**
 - 开仓成功后，Position NFT 出现在钱包
@@ -269,7 +269,7 @@ _注：假设平均手续费 0.4%（Maker/Taker 混合）_
 | CS2 支持 | ✅ | ❌ | ❌ | ❌ |
 | 链上订单簿 | ✅ | ❌（AMM） | ✅ | ❌（AMM） |
 | NFT 头寸 | ✅ | ❌ | ❌ | ❌ |
-| 杠杆上限 | 6x | 50x | 20x | 150x |
+| 杠杆上限 | 10x | 50x | 20x | 150x |
 | 最低保证金 | USDC | USDC/ETH | USDC | DAI/USDC |
 | 目标用户 | CS2 玩家/投机 | DeFi 交易员 | DeFi 交易员 | DeFi 交易员 |
 

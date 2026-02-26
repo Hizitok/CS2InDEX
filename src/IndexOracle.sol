@@ -11,10 +11,7 @@ import {IOracle} from "./interfaces/IOracle.sol";
  */
 contract IndexOracle is Ownable, IOracle {
 
-    address public factory;
-
     uint256 public settlementPeriod = 8 hours;
-    uint256 public lastFundingTime;
 
     // Funding rate parameters (in basis points, 1 bp = 0.01%)
     int128 public constant BASIS_POINT = 10000;      // 100% = 10000 bp
@@ -29,7 +26,7 @@ contract IndexOracle is Ownable, IOracle {
     // Maximum time interval counted per trade in the weighted average.
     // A single price point that persists longer than this is capped, preventing one
     // stale or illiquid period from monopolising the entire period's weight.
-    uint256 public constant MAX_TRADE_INTERVAL = 1 hours;
+    uint256 public constant MAX_TRADE_INTERVAL = 2 hours;
 
     /**
      * Premium Index Calculation Formula:
@@ -61,10 +58,7 @@ contract IndexOracle is Ownable, IOracle {
 
     error UnauthorizedPool();
 
-    constructor() Ownable(msg.sender) {
-        factory = msg.sender;
-        lastFundingTime = block.timestamp;
-    }
+    constructor() Ownable(msg.sender) {}
 
     modifier onlyPool(address pool) {
         if(!authorizedPools[pool]) revert UnauthorizedPool();
@@ -168,8 +162,6 @@ contract IndexOracle is Ownable, IOracle {
 
         // Interest Rate = BASE_RATE / periodsPerDay
         interestRate = BASE_RATE / int128( uint128(periodsPerDay) );
-
-        return interestRate;
     }
 
     /**

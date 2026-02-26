@@ -21,7 +21,7 @@ CS2InDEX is inspired by traditional cryptocurrency exchanges like Binance and OK
 
 ### 📊 Trading Features
 - **Perpetual Futures** - No expiration, continuous trading
-- **Leverage Trading** - Up to 6x leverage on positions
+- **Leverage Trading** - Up to 10x leverage on positions
 - **Long & Short** - Profit from both rising and falling prices
 - **NFT Positions** - Each position is an ERC721 NFT (transferable)
 - **On-Chain Order Book** - Order Statistics Tree for efficient matching

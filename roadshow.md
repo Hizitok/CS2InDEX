@@ -29,13 +29,11 @@
 
 以下两个问题会让投资人或技术评审直接否掉演示：
 
-- [ ] **Router 不可用**：`depositAndOpenPosition` 是主要用户入口，但 Router 未在 Vault 中授权
-  - 修复：`Factory.createPool()` 末尾加 `vault.setPool(router, true)`
-  - 影响：当前用户无法通过 Router 正常交互
+- [x] **Router 不可用**：`depositAndOpenPosition` 是主要用户入口，但 Router 未在 Vault 中授权
+  - 已修复：`Factory.setRouter(_router)` 注册 Router 并授权至 Vault + 所有现有 Pool；新建 Pool 时自动调用 `pool.setRouter(router)`；`Router.withdraw` 改用 `vault.withdrawFor` 修复提款 msg.sender 错误；`Vault` 新增 `withdrawFor(user, to, amount)` 方法
 
-- [ ] **`emergencyCloseAllPositions` 方法体为空**：只 emit 事件，不执行任何操作
-  - 修复：实现完整逻辑，或临时改为 `revert NotImplemented()`
-  - 影响：风控机制显示为空壳，严重影响可信度
+- [x] **`emergencyCloseAllPositions` 方法体为空**：只 emit 事件，不执行任何操作
+  - 已修复：实现完整逻辑——先暂停 Pool，再对传入的 position ID 数组依次在 oracle 价格执行强平；用 try/catch 跳过无效 ID，不中断批量执行
 
 ### 2. 测试网部署
 
@@ -51,7 +49,7 @@
 路演核心材料，缺一不可：
 
 - [ ] **问题**：CS2 皮肤持有者无法对冲价格下跌风险；投机者无法做空皮肤市场
-- [ ] **解决方案**：链上永续合约，追踪 CS2 市场指数，支持最高 6x 杠杆
+- [ ] **解决方案**：链上永续合约，追踪 CS2 市场指数，支持最高 10x 杠杆
 - [ ] **市场规模**：CS2 皮肤市场 ~$50-80 亿美元存量，年交易额 $XX 亿（需引用数据）
 - [ ] **产品演示截图**：前端界面、开仓/平仓流程、PnL 结算
 - [ ] **技术架构图**：一张简洁的系统图（Factory / Pool / Oracle / NFT）

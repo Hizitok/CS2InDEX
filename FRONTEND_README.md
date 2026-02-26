@@ -578,7 +578,7 @@ export function RecentTrades() {
 | `getOrderbookInfo()` | - | `(lastPrice, askPrice, bidPrice)` | 获取订单簿快照 |
 | `getLastPrice()` | - | `uint256` | 获取最新成交价 |
 | `fundingIdx()` | - | `uint256` | 获取当前资金费率指数 |
-| `maxLeverage()` | - | `uint256` | 获取最大杠杆（600 = 6x） |
+| `maxLeverage()` | - | `uint256` | 获取最大杠杆（1000 = 10x） |
 | `oraclePrice()` | - | `uint256` | 获取预言机价格 |
 | `getPoolInfo()` | - | `(description, lastPrice)` | 获取池子信息 |
 

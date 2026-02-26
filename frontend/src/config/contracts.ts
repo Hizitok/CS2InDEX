@@ -191,6 +191,19 @@ export const POOL_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  // getDepth(uint256 nLevels) => (askPrices, askSizes, bidPrices, bidSizes)
+  {
+    inputs: [{ name: 'nLevels', type: 'uint256' }],
+    name: 'getDepth',
+    outputs: [
+      { name: 'askPrices', type: 'uint256[]' },
+      { name: 'askSizes',  type: 'uint256[]' },
+      { name: 'bidPrices', type: 'uint256[]' },
+      { name: 'bidSizes',  type: 'uint256[]' },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
   // Events
   {
     anonymous: false,

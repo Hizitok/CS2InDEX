@@ -106,7 +106,7 @@
 |------|-----|------|
 | Maker Fee | 0.3% (3000/1e6) | 挂单方手续费 |
 | Taker Fee | 0.5% (5000/1e6) | 吃单方手续费 |
-| Max Leverage | 6x (600/100) | 最大杠杆倍数 |
+| Max Leverage | 10x (600/100) | 最大杠杆倍数 |
 | Maintenance Margin | 20% | 维持保证金率 |
 | Funding Period | 8 hours | 资金费率结算周期 |
 | Funding Rate Cap | ±2% (±200bp) | 资金费率上下限 |

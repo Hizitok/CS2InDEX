@@ -6,7 +6,7 @@ import { Toaster } from 'react-hot-toast';
 
 export const metadata: Metadata = {
   title: 'CS2InDEX - Decentralized CS2 Item Perpetual Trading',
-  description: 'Trade CS2 item perpetual contracts with up to 6x leverage',
+  description: 'Trade CS2 item perpetual contracts with up to 10x leverage',
 };
 
 export default function RootLayout({

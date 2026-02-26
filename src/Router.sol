@@ -83,7 +83,10 @@ contract CS2InDEXRouter is IRouter, ReentrancyGuard {
     /// @inheritdoc IRouter
     function withdraw(uint256 amount) external nonReentrant {
         if (amount == 0) revert ZeroAmount();
-        IVault(vault).withdrawTo(msg.sender, amount);
+        // withdrawFor deducts from the user's vault balance and sends to them.
+        // withdrawTo(msg.sender=Router) would incorrectly deduct from Router's
+        // balance (always 0). The Router is authorized in Vault via setRouter().
+        IVault(vault).withdrawFor(msg.sender, msg.sender, amount);
         emit Withdrawn(msg.sender, amount);
     }
 

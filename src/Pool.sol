@@ -7,9 +7,10 @@ import {IPosition} from "./interfaces/IPosition.sol";
 import {IOracle} from "./interfaces/IOracle.sol";
 import {IEngine} from "./interfaces/IEngine.sol";
 import {Ownable} from "./libraries/Ownable.sol";
+import {Pausable} from "./libraries/Pausable.sol";
 import {IzitOSTreeMinimum} from "./libraries/IzitOSTreeMinimum.sol";
 
-contract Pool is Ownable, IPool, IzitOSTreeMinimum {
+contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
 
     uint256 public constant MAKERFEE = 3000;
     uint256 public constant TAKERFEE = 5000;
@@ -17,7 +18,6 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
 
     string public description;
 
-    address public factory;
     address public oracle;
     address public positionNFT;
     address public vault;
@@ -27,7 +27,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     uint256 public fundingIdx = 1 << 63;
     uint256 public lastPrice;
     uint256 public oraclePrice;
-    uint256 public maxLeverage = 600;
+    uint256 public maxLeverage = 1000;
 
     // orderId => PriceX100, Size
     mapping(OrderId => uint256) internal OBPx;
@@ -47,7 +47,6 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         uint256 _initialPrice,
         string memory _description
     ) Ownable(msg.sender) {
-        factory = msg.sender;
         vault = _vault;
         positionNFT = _positionNFT;
         oracle = _oracle;
@@ -81,10 +80,29 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         return OBPx[OrderId.wrap(ptrA)] < OBPx[OrderId.wrap(ptrB)];
     }
 
+    // ------------ Emergency Pause ------------ //
+
+    /**
+     * @notice Pause new order creation (owner only)
+     * @dev Cancel, close, and settle remain unaffected so users can always exit positions.
+     */
+    function pause() external onlyOwner { _pause(); }
+
+    /**
+     * @notice Resume new order creation (owner only)
+     */
+    function unpause() external onlyOwner { _unpause(); }
+
+    /// @inheritdoc IPool
+    function paused() public view override(Pausable, IPool) returns (bool) {
+        return Pausable.paused();
+    }
+
     // ------------ Interfaces Function Part ------------ //
 
     function newOrder(uint256 margin, PoolOrder memory pOrder)
         public
+        whenNotPaused
         returns (OrderId newPosId)
     {
         return _newOrderInternal(msg.sender, margin, pOrder);
@@ -98,6 +116,7 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     function newOrderFor(address trader, uint256 margin, PoolOrder memory pOrder)
         external
         onlyRouter
+        whenNotPaused
         returns (OrderId newPosId)
     {
         return _newOrderInternal(trader, margin, pOrder);
@@ -399,6 +418,57 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
         external
         onlyEngine
     {
+        _forceLiquidateInternal(orderId, pOrder);
+    }
+
+    /**
+     * @notice Emergency close all listed positions at oracle price (owner only)
+     * @dev Pauses the pool first to prevent new orders, then force-closes each
+     *      position. Position IDs are supplied by an off-chain indexer (e.g. TheGraph
+     *      or getPositionsByOwner). Positions that are not open are silently skipped.
+     * @param positionIds Array of open position IDs to force-close
+     */
+    function emergencyCloseAllPositions(OrderId[] calldata positionIds)
+        external
+        onlyOwner
+    {
+        _pause();
+
+        uint256 refPx = oraclePrice > 0 ? oraclePrice : lastPrice;
+
+        for (uint256 i = 0; i < positionIds.length; i++) {
+            OrderId oid = positionIds[i];
+            Position memory pos = IPosition(positionNFT).getPosition(oid);
+
+            // Skip positions that are not open
+            if (pos.status != posStatus.open) continue;
+
+            PoolOrder memory closeOrder = PoolOrder({
+                isSell: !pos.isShort,   // long (isShort=false) → close with sell
+                oType:  orderType.Limit,
+                size:   pos.openSize,
+                price:  refPx
+            });
+
+            // Use try/catch so a single bad position doesn't abort the batch
+            try this.forceLiquidateAsOwner(oid, closeOrder) {} catch {}
+        }
+    }
+
+    /**
+     * @notice Self-call trampoline enabling try/catch in emergencyCloseAllPositions
+     * @dev External so try works; restricted to calls from this contract only.
+     */
+    function forceLiquidateAsOwner(OrderId orderId, PoolOrder calldata pOrder)
+        external
+    {
+        require(msg.sender == address(this), "Only self");
+        _forceLiquidateInternal(orderId, pOrder);
+    }
+
+    function _forceLiquidateInternal(OrderId orderId, PoolOrder memory pOrder)
+        internal
+    {
         Position memory pos = IPosition(positionNFT).getPosition(orderId);
 
         if(pos.status != posStatus.open) revert InvalidStatus();
@@ -637,11 +707,66 @@ contract Pool is Ownable, IPool, IzitOSTreeMinimum {
     function getPoolInfo() external view
         returns (
             string memory,
-            uint256 
-        ) 
+            uint256
+        )
     {
         // TBD
         return (description, lastPrice);
+    }
+
+    /**
+     * @notice Get order book depth for depth chart display
+     * @dev Traverses both order trees in price order, aggregating orders at the same
+     *      price level. Asks are returned ascending (best ask first); bids descending
+     *      (best bid first). Trailing entries are zero when fewer than nLevels exist.
+     * @param nLevels Maximum number of distinct price levels to return per side
+     * @return askPrices Sell-side price levels (ascending)
+     * @return askSizes  Total open size at each ask price level
+     * @return bidPrices Buy-side price levels (descending)
+     * @return bidSizes  Total open size at each bid price level
+     */
+    function getDepth(uint256 nLevels) external view returns (
+        uint256[] memory askPrices,
+        uint256[] memory askSizes,
+        uint256[] memory bidPrices,
+        uint256[] memory bidSizes
+    ) {
+        askPrices = new uint256[](nLevels);
+        askSizes  = new uint256[](nLevels);
+        bidPrices = new uint256[](nLevels);
+        bidSizes  = new uint256[](nLevels);
+
+        // --- Asks: ascending from best ask (lowest price) ---
+        uint256 key = getMin(_ask_OB);
+        uint256 levelCount = 0;
+        while (key != 0 && levelCount < nLevels) {
+            uint256 px = OBPx[OrderId.wrap(key)];
+            uint256 sz = OBSize[OrderId.wrap(key)];
+            if (levelCount == 0 || askPrices[levelCount - 1] != px) {
+                askPrices[levelCount] = px;
+                askSizes[levelCount]  = sz;
+                levelCount++;
+            } else {
+                askSizes[levelCount - 1] += sz;
+            }
+            key = nextKey(_ask_OB, key);
+        }
+
+        // --- Bids: descending from best bid (highest price) ---
+        key = getMax(_bid_OB);
+        levelCount = 0;
+        while (key != 0 && levelCount < nLevels) {
+            uint256 px = OBPx[OrderId.wrap(key)];
+            uint256 sz = OBSize[OrderId.wrap(key)];
+            if (levelCount == 0 || bidPrices[levelCount - 1] != px) {
+                bidPrices[levelCount] = px;
+                bidSizes[levelCount]  = sz;
+                levelCount++;
+            } else {
+                bidSizes[levelCount - 1] += sz;
+            }
+            key = prevKey(_bid_OB, key);
+        }
     }
 
 }

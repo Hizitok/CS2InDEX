@@ -1,11 +1,13 @@
 # Foundry Outputs
 out/
 
-# test scripts
+# shell scripts (test/temp only; deployment scripts tracked via negation below)
 *.sh
+!deploy/deploy.sh
 
 # Compilation docs
-*/artifacts
+*config.json
+artifacts/
 
 */.deps
 # Claude 
@@ -48,3 +50,10 @@ cache/
 
 # Misc
 .vercel
+
+# Foundry coverage output
+lcov.info
+coverage/
+
+# TypeScript build info cache
+*.tsbuildinfo
