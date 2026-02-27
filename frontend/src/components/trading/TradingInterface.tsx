@@ -12,7 +12,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import toast from 'react-hot-toast';
-import { POOL_ABI, PX_DECIMALS, ORDER_TYPE, TAKER_FEE } from '@/config/contracts';
+import { POOL_ABI, PX_DECIMALS, ORDER_TYPE, TAKER_FEE, CONTRACTS } from '@/config/contracts';
 import { TrendingUp, TrendingDown, Info, Wallet, Calculator } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -21,10 +21,10 @@ import { useLanguage } from '@/contexts/LanguageContext';
  * 交易标的物接口定义
  * @interface TradeItem
  */
-// Index Configuration
+// Index Configuration — pool address from contracts.ts (updated post-deployment)
 const INDEX_ASSET = {
   name: 'CS2 Market Index',
-  pool: '0x0000000000000000000000000000000000000000' // Placeholder
+  pool: CONTRACTS.POOL,
 };
 
 const MAX_LEVERAGE = 10; // 最大杠杆倍数

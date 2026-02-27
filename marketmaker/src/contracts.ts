@@ -90,6 +90,16 @@ export const POSITION_NFT_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [{ name: 'owner', type: 'address' }],
+    name: 'getPositionsByOwner',
+    outputs: [
+      { name: 'tokenIds', type: 'uint256[]' },
+      { name: 'positions', type: 'tuple[]', components: POSITION_COMPONENTS },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const;
 
 export const VAULT_ABI = [
@@ -132,12 +142,14 @@ export const ERC20_ABI = [
 // orderType enum values matching OrderTypes.sol
 export const ORDER_TYPE = { Market: 1, Limit: 2 } as const;
 
-// posStatus enum values
+// posStatus enum values — must match OrderTypes.sol:
+//   enum posStatus { none=0, pendingOpen=1, open=2, pendingClose=3, liquidating=4, closed=5, settled=6 }
 export const POS_STATUS = {
-  pendingOpen:  0,
-  open:         1,
-  pendingClose: 2,
-  closed:       3,
+  none:         0,
+  pendingOpen:  1,
+  open:         2,
+  pendingClose: 3,
   liquidating:  4,
-  settled:      5,
+  closed:       5,
+  settled:      6,
 } as const;

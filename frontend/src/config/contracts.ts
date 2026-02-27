@@ -1,8 +1,13 @@
 // Contract addresses - Update these after deployment
+// deploy.sh auto-updates FACTORY, VAULT, USDC, ROUTER, NFT, POOL after running
 export const CONTRACTS = {
   VAULT: '0x...' as `0x${string}`,
   FACTORY: '0x...' as `0x${string}`,
   USDC: '0x...' as `0x${string}`,
+  ROUTER: '0x...' as `0x${string}`,
+  NFT: '0x...' as `0x${string}`,
+  // Primary pool (CS2-Global-Index). Update after deployment.
+  POOL: '0x...' as `0x${string}`,
 } as const;
 
 // Price decimals (aligned with USDC = 6)

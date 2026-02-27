@@ -73,6 +73,9 @@ export class MarketMaker {
         await this.initPositionNFT();
         log('Position NFT:', positionNFTAddress);
 
+        // Close any orphan open positions left from previous runs before placing grid
+        await this.closeOrphanPositions();
+
         // First grid placement
         const mid = await this.getMidPrice();
         log(`Mid price: ${mid}`);
@@ -96,7 +99,10 @@ export class MarketMaker {
             }
         }
 
-        // 2. Refresh grid if price has moved more than 1.5 steps from center
+        // 2. Close any open positions not tracked in slots (e.g. orphaned from prev run)
+        await this.closeOrphanPositions();
+
+        // 3. Refresh grid if price has moved more than 1.5 steps from center
         const needsRefresh = await this.gridNeedsRefresh(mid);
         if (needsRefresh) {
             log(`Price moved to ${mid}, refreshing grid…`);
@@ -275,6 +281,81 @@ export class MarketMaker {
     private async cancelOrder(posId: bigint): Promise<void> {
         log(`Cancelling posId=${posId}`);
         await this.writePool('cancelOrder', [posId]);
+    }
+
+    // ── Self-trade close (orphan cleanup) ────────────────────────────────────────
+
+    /**
+     * Scan all positions owned by this account on-chain. For any that are fully
+     * open (status=open, no pending close) and NOT already tracked in slots with
+     * a pending-close, place a Market close order.
+     *
+     * The Market close order hits the best available bid/ask in the pool, which is
+     * typically the bot's own grid limit orders — achieving self-trade settlement.
+     * This also handles positions left open after a bot restart.
+     */
+    async closeOrphanPositions(): Promise<void> {
+        let result: [readonly bigint[], readonly {
+            positionID: bigint; pool: string; isShort: boolean; status: number;
+            openMargin: bigint; pendingSize: bigint; openSize: bigint; closeSize: bigint;
+            openAmount: bigint; closeAmount: bigint;
+            openFundingIdx: bigint; closeFundingIdx: bigint;
+        }[]];
+
+        try {
+            result = await this.pub.readContract({
+                address: positionNFTAddress,
+                abi: POSITION_NFT_ABI,
+                functionName: 'getPositionsByOwner',
+                args: [this.account.address],
+            }) as typeof result;
+        } catch (e) {
+            warn('closeOrphanPositions: getPositionsByOwner failed:', e);
+            return;
+        }
+
+        const [tokenIds, positions] = result;
+
+        // Build set of posIds already tracked with a pending-close
+        const pendingClose = new Set<bigint>(
+            [...this.slots.values()]
+                .filter(s => s.posId !== null && s.status === POS_STATUS.pendingClose)
+                .map(s => s.posId!)
+        );
+
+        let closed = 0;
+        for (let i = 0; i < tokenIds.length; i++) {
+            const posId = tokenIds[i];
+            const pos   = positions[i];
+
+            // Only target fully open positions on this pool
+            if (pos.status !== POS_STATUS.open) continue;
+            if (pos.pool.toLowerCase() !== CONFIG.poolAddress.toLowerCase()) continue;
+            if (pendingClose.has(posId)) continue;
+
+            // Long (isShort=false) → close with sell (isSell=true)
+            // Short (isShort=true) → close with buy  (isSell=false)
+            const isSell = !pos.isShort;
+            log(`Self-trade close: posId=${posId} ${pos.isShort ? 'short' : 'long'} size=${pos.openSize}`);
+
+            try {
+                await this.writePool('closePosition', [
+                    posId,
+                    {
+                        isSell,
+                        oType:  ORDER_TYPE.Market, // market order → matches bot's own limit orders
+                        size:   pos.openSize,
+                        price:  0n,
+                    },
+                ]);
+                closed++;
+                log(`  → closed posId=${posId}`);
+            } catch (e) {
+                warn(`  self-trade close failed for posId=${posId}:`, e);
+            }
+        }
+
+        if (closed > 0) log(`closeOrphanPositions: closed ${closed} position(s)`);
     }
 
     // ── Martingale ──────────────────────────────────────────────────────────────

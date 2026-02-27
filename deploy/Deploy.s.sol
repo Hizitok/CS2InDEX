@@ -13,11 +13,11 @@ import {TestERC20}       from "../test/mocks/TestERC20.sol";
  * @title CS2InDEX 一键部署脚本
  *
  * 用法（测试网，自动 mint MockUSDC）：
- *   forge script script/Deploy.s.sol --rpc-url sepolia --broadcast --verify -vvvv
+ *   forge script deploy/Deploy.s.sol --rpc-url sepolia --broadcast --verify -vvvv
  *
  * 用法（主网，使用真实 USDC）：
  *   USDC_ADDRESS=0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48 \
- *   forge script script/Deploy.s.sol --rpc-url mainnet --broadcast --verify --slow -vvvv
+ *   forge script deploy/Deploy.s.sol --rpc-url mainnet --broadcast --verify --slow -vvvv
  *
  * 环境变量（写在 .env 里）：
  *   PRIVATE_KEY       部署者私钥
@@ -113,11 +113,12 @@ contract Deploy is Script {
         router = address(rtr);
         console.log("[Router]    deployed:", router);
 
-        // ── Step 5: 给每个 Pool 注册 Router ───────────────────────────────────
-        for (uint256 i = 0; i < pools.length; i++) {
-            IPool(pools[i]).setRouter(router);
-        }
-        console.log("[Router]    wired to all pools");
+        // ── Step 5: 注册 Router（同时授权 Vault.withdrawFor）────────────────────
+        // 必须用 fac.setRouter()，而非直接调 IPool.setRouter()：
+        //   Factory.setRouter() 额外执行 Vault.setPool(router, true)
+        //   使 Router 可调用 Vault.withdrawFor()（用户提现路径）
+        fac.setRouter(router);
+        console.log("[Router]    wired to all pools + authorized in Vault");
 
         // ── Step 6: 更新初始 Oracle 价格 ──────────────────────────────────────
         // Factory 是 Oracle 的 owner，通过 factory.updatePrice 中继

@@ -119,7 +119,7 @@ echo ""
 
 # 构建 forge script 命令
 FORGE_CMD=(
-  forge script script/Deploy.s.sol
+  forge script deploy/Deploy.s.sol
   --rpc-url "$RPC_URL"
   --private-key "$PRIVATE_KEY"
   --broadcast
@@ -184,11 +184,14 @@ data    = json.load(open(sys.argv[1]))
 cfg     = open(sys.argv[2]).read()
 chainId = sys.argv[3]
 
-# 替换常量地址
+# 替换常量地址（POOL 取第一个 pool，即 CS2-Global-Index）
+first_pool = data.get("pools", [{}])[0].get("pool", "")
 for key, val in [("FACTORY", data.get("factory","")),
                  ("VAULT",   data.get("vault","")),
                  ("USDC",    data.get("usdc","")),
-                 ("ROUTER",  data.get("router",""))]:
+                 ("ROUTER",  data.get("router","")),
+                 ("NFT",     data.get("nft","")),
+                 ("POOL",    first_pool)]:
     cfg = re.sub(
         rf'({key}\s*:\s*[\'"])0x[0-9a-fA-F]+([\'"])',
         lambda m, v=val: f"{m.group(1)}{v}{m.group(2)}",

@@ -9,13 +9,11 @@
  */
 
 import { useAccount, useReadContract } from 'wagmi';
-import { POSITION_NFT_ABI } from '@/config/contracts';
+import { POSITION_NFT_ABI, CONTRACTS } from '@/config/contracts';
 import { PositionCard } from './PositionCard';
 import { Layers } from 'lucide-react';
 
 import { useLanguage } from '@/contexts/LanguageContext';
-
-const POSITION_NFT_ADDRESS = '0x...' as `0x${string}`;
 
 /**
  * 持仓列表主组件
@@ -27,7 +25,7 @@ export function PositionsList() {
   // 获取用户持仓数据
   // 返回值: [tokenIds[], positionData[]]
   const { data: positionsData, isLoading } = useReadContract({
-    address: POSITION_NFT_ADDRESS,
+    address: CONTRACTS.NFT,
     abi: POSITION_NFT_ABI,
     functionName: 'getPositionsByOwner',
     args: address ? [address] : undefined,

@@ -7,6 +7,7 @@ import { VaultBalance } from '@/components/vault/VaultBalance';
 import { PriceChart } from '@/components/market/PriceChart';
 import { OrderbookDepth } from '@/components/market/OrderbookDepth';
 import { useLanguage } from '@/contexts/LanguageContext';
+import { CONTRACTS } from '@/config/contracts';
 
 export default function PositionsPage() {
     const { t } = useLanguage();
@@ -54,7 +55,7 @@ export default function PositionsPage() {
                 {/* Right Column: Positions List (Wider) */}
                 <div className="lg:col-span-8 order-1 lg:order-2">
                     <PriceChart />
-                    <OrderbookDepth demo />
+                    <OrderbookDepth poolAddress={CONTRACTS.POOL} />
                     <PositionsList />
                 </div>
             </div>
