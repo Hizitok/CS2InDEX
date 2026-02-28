@@ -1033,10 +1033,15 @@ contract MockPosition is IPosition {
     mapping(uint256 => Position) private positions;
     mapping(uint256 => address) private owners;
     mapping(address => bool) private authorizedPools;
+    mapping(uint256 => address) private _pools;
 
     function setPool(address pool, bool authorized) external {
         authorizedPools[pool] = authorized;
     }
+    function getPool(OrderId id) external view returns (address) {
+        return _pools[OrderId.unwrap(id)];
+    }
+
 
     function newNFT(
         PoolOrder calldata pOrder,
@@ -1050,9 +1055,8 @@ contract MockPosition is IPosition {
 
         owners[tokenIdCounter] = owner;
 
+        _pools[tokenIdCounter]  = msg.sender;
         positions[tokenIdCounter] = Position({
-            positionID: tokenIdCounter,
-            pool: msg.sender,
             isShort: pOrder.isSell,
             status: posStatus.pendingOpen,
             openMargin: margin,

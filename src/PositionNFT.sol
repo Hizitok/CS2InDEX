@@ -17,6 +17,9 @@ contract positionNFT is OrderTypes, PosERC721 {
     // Token ID => Position data
     mapping(uint256 => Position) private _positions;
 
+    // Token ID => Pool address
+    mapping(uint256 => address) private _pools;
+
     // Authorized pools (can mint and update positions)
     mapping(address => bool) private _authorizedPools;
 
@@ -37,6 +40,12 @@ contract positionNFT is OrderTypes, PosERC721 {
         address indexed owner
     );
 
+    // Errors
+    error PosNotExist();
+    error InvalidAddress();
+    error InvalidOwner();
+    error NotAuthorized();
+
     modifier onlyPool() {
         require(_authorizedPools[msg.sender], "Only authorized pool");
         _;
@@ -52,7 +61,7 @@ contract positionNFT is OrderTypes, PosERC721 {
      * @param allowed Whether pool is authorized
      */
     function setPool(address pool, bool allowed) external onlyOwner {
-        require(pool != address(0), "Invalid pool address");
+        if(pool == address(0)) revert InvalidAddress();
         _authorizedPools[pool] = allowed;
     }
 
@@ -69,15 +78,12 @@ contract positionNFT is OrderTypes, PosERC721 {
         onlyPool
         returns (OrderId oID)
     {
-        require(owner != address(0), "Invalid owner");
+        if(owner == address(0)) revert InvalidOwner();
 
         tokenCount += 1;
         oID = OrderId.wrap(tokenCount);
 
         Position memory newPos = Position({
-            positionID: tokenCount,
-            pool: msg.sender,
-
             isShort: pOrder.isSell,
             status: posStatus.pendingOpen,
             openMargin: margin,
@@ -91,6 +97,7 @@ contract positionNFT is OrderTypes, PosERC721 {
         });
 
         _positions[tokenCount] = newPos;
+        _pools[tokenCount] = msg.sender;
         _owners[tokenCount] = owner;
         _balances[owner] += 1;
 
@@ -109,7 +116,7 @@ contract positionNFT is OrderTypes, PosERC721 {
         returns (Position memory)
     {
         uint256 id = OrderId.unwrap(oID);
-        require(_positions[id].positionID != 0, "Position does not exist");
+        if( _pools[id]==address(0) ) revert PosNotExist();
         return _positions[id];
     }
 
@@ -124,14 +131,43 @@ contract positionNFT is OrderTypes, PosERC721 {
         returns (bool)
     {
         uint256 id = OrderId.unwrap(oID);
-        require(_positions[id].positionID != 0, "Position does not exist");
-        require(_positions[id].pool == msg.sender, "Not position pool");
+        if( _pools[id] == address(0) ) revert PosNotExist();
+        if( _pools[id] != msg.sender ) revert NotAuthorized();
 
         _positions[id] = pos;
 
         emit PositionUpdated(id, pos);
         return true;
     }
+
+    /**
+     * @notice Mark position as settled
+     * @param oID Position ID
+     */
+    function settlePosition(OrderId oID) external onlyPool {
+        uint256 id = OrderId.unwrap(oID);
+        if( _pools[id] == address(0) ) revert PosNotExist();
+        if( _pools[id] != msg.sender ) revert NotAuthorized();
+        require(_positions[id].status != posStatus.settled, "Already settled");
+
+        _positions[id].status = posStatus.settled;
+
+        emit PositionSettled(id, _owners[id]);
+    }
+
+    /**
+     * @notice Get Pool of a position
+     * @param orderId Position ID
+     * @return Pool pool address
+     */  
+    function getPool(OrderId orderId)
+        external
+        view
+        returns (address)
+    {
+        return _pools[OrderId.unwrap(orderId)];
+    }
+    
 
     /**
      * @notice Get opening price of a position
@@ -144,29 +180,13 @@ contract positionNFT is OrderTypes, PosERC721 {
         returns (uint256)
     {
         uint256 id = OrderId.unwrap(orderId);
-        require(_positions[id].pool != address(0), "Invalid position");
-
+        if( _pools[id] == address(0) ) revert PosNotExist();
         // Calculate average opening price
-        if (_positions[id].openSize == 0) {
+        if(_positions[id].openSize == 0) {
             return 0;
         }
 
         return _positions[id].openAmount / _positions[id].openSize;
-    }
-
-    /**
-     * @notice Mark position as settled
-     * @param oID Position ID
-     */
-    function settlePosition(OrderId oID) external onlyPool {
-        uint256 id = OrderId.unwrap(oID);
-        require(_positions[id].positionID != 0, "Position does not exist");
-        require(_positions[id].pool == msg.sender, "Not position pool");
-        require(_positions[id].status != posStatus.settled, "Already settled");
-
-        _positions[id].status = posStatus.settled;
-
-        emit PositionSettled(id, _owners[id]);
     }
 
     /**
@@ -177,7 +197,7 @@ contract positionNFT is OrderTypes, PosERC721 {
      */
     function isAuthorized(OrderId oID, address user) external view returns (bool) {
         uint256 id = OrderId.unwrap(oID);
-        return (_positions[id].pool == user) || _authorized(id, user);
+        return (_pools[id] == user) || _authorized(id, user);
     }
 
     /**
@@ -225,7 +245,7 @@ contract positionNFT is OrderTypes, PosERC721 {
 
         uint256 index = 0;
         for (uint256 i = 1; i <= tokenCount && index < balance; i++) {
-            if (_owners[i] == owner) {
+            if(_owners[i] == owner) {
                 tokenIds[index] = i;
                 positions[index] = _positions[i];
                 index++;

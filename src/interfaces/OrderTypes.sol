@@ -19,9 +19,6 @@ interface OrderTypes {
 
     struct Position {
 
-        uint256 positionID;
-
-        address pool;
         bool isShort;
         posStatus status;
         // openMargin stores the margin at open price

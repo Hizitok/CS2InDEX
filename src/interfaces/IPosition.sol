@@ -66,6 +66,8 @@ interface IPosition is OrderTypes {
      */
     function setPool(address pool, bool authorized) external;
 
+    function getPool(OrderId) external view returns (address);
+
     /**
      * @notice Get total supply of position NFTs
      * @return Total supply

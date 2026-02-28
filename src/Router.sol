@@ -186,12 +186,14 @@ contract CS2InDEXRouter is IRouter, ReentrancyGuard {
         (uint256[] memory ids, Position[] memory positions) =
             IPosition(nft).getPositionsByOwner(user);
 
+        
         views = new PositionView[](ids.length);
         for (uint256 i = 0; i < ids.length; i++) {
-            address pool = positions[i].pool;
+            OrderId id = OrderId.wrap(ids[i]);
+            address pool = IPosition(nft).getPool(id);
             views[i] = PositionView({
                 pool:        pool,
-                posId:       OrderId.wrap(ids[i]),
+                posId:       id,
                 pos:         positions[i],
                 oraclePrice: IPool(pool).oraclePrice()
             });
