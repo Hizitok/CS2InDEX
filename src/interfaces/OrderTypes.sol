@@ -25,17 +25,17 @@ interface OrderTypes {
         // funding rates are calculated in funding indexes
         uint256 openMargin;
 
-        uint256 pendingSize;
-        uint256 openSize;
-        uint256 closeSize;
+        uint128 pendingSize;
+        uint128 openSize;
+        uint128 closeSize;
 
         // Amount = matched price * matched size
-        uint256 openAmount;
-        uint256 closeAmount;
+        uint128 openAmount;
+        uint128 closeAmount;
 
-        // Cumulative Funding index 
-        uint256 openFundingIdx;
-        uint256 closeFundingIdx;
+        // Cumulative Funding index
+        uint128 openFundingIdx;
+        uint128 closeFundingIdx;
     }
 
 }

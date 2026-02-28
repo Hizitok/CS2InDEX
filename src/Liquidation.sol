@@ -303,6 +303,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
         emit PositionLiquidated(oID, msg.sender, markPrice, bankruptPx);
     }
 
+    function cvt256(uint128 u128) internal pure returns (int256)
+    {
+        return int256(uint256(u128));
+    }
     /**
      * @dev Compute relativePx — the liquidation price before adding fundingIdx.
      *
@@ -317,10 +321,10 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
     {
         uint256 decFactor = 10 ** pxDecimals;
 
-        int256 base = int256(pos.openAmount) - int256(pos.openFundingIdx);
+        int256 base = cvt256(pos.openAmount) - cvt256(pos.openFundingIdx);
 
         int256 numerator = base + int256(pos.isShort?int256(1):-1) * int256(maxLoss * decFactor);
-        return numerator / int256(pos.openSize);
+        return numerator / cvt256(pos.openSize);
     }
 
     /**

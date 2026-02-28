@@ -1142,7 +1142,11 @@ contract IntegrationTest is Test, OrderTypes {
             size: size, price: 0
         }));
     }
-
+    function cvt256(uint128 u128) internal pure returns (int256)
+    {
+        return int256(uint256(u128));
+    }
+    
     function _assertTriggerPrice(LiquidationEngine engine, OrderId longId, uint256 fIdx) internal {
         Position memory pos = nft.getPosition(longId);
         console.log("\nLong position data:");
@@ -1153,8 +1157,8 @@ contract IntegrationTest is Test, OrderTypes {
 
         // Manual trigger: maxLoss = 80% of margin; relativePx = (amount - fundingIdx - loss) / size
         uint256 maxLoss   = pos.openMargin * 8000 / 10000;
-        int256 base       = int256(pos.openAmount) - int256(pos.openFundingIdx);
-        int256 relativePx = (base - int256(maxLoss * 1e6)) / int256(pos.openSize);
+        int256 base       = cvt256(pos.openAmount) - cvt256(pos.openFundingIdx);
+        int256 relativePx = (base - int256(maxLoss * 1e6)) / cvt256(pos.openSize);
         uint256 actualTrigger = uint256(relativePx + int256(fIdx));
 
         console.log("\nManual trigger:");

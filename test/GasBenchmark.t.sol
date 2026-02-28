@@ -12,7 +12,7 @@ import {OrderTypes}       from "../src/interfaces/OrderTypes.sol";
 
 /**
  * @title Gas Benchmark — 极端压力测试
- * @notice 随机挂1000个限价/市价单，统计 newOrder 的 gas 开销分布。
+ * @notice 随机挂5000个限价/市价单，统计 newOrder 的 gas 开销分布。
  *
  *   规则：
  *     - 价格随机 [$100, $200]（步长 $1）
@@ -42,13 +42,14 @@ contract GasBenchmarkTest is Test, OrderTypes {
     uint256 constant INITIAL_PRICE  = 150e6;   // 初始 oracle 价格 $150
     uint256 constant MINT_AMOUNT    = 5_000_000e6; // 每个账户存 500 万 USDC
     uint256 constant MARGIN_PER_ORD = 1_500e6; // 每笔保证金 $1500（足够 100 units @ $200 10x）
-    uint256 constant ROUNDS         = 1000;
+    uint256 constant ROUNDS         = 2000;
     uint256[5] SIZES;                          // 单位量 (6 dec)
 
     // ── Gas stats ────────────────────────────────────────────────
-    // 每 100 笔一个 checkpoint，共 10 段
-    uint256[10] cpSum;    // 阶段 gas 累计
-    uint256[10] cpCnt;    // 阶段成功笔数
+    // 每 100 笔一个 checkpoint，段数 = ROUNDS / 100
+    uint256 constant CP_COUNT = ROUNDS / 100;
+    uint256[CP_COUNT] cpSum;
+    uint256[CP_COUNT] cpCnt;
 
     uint256 totalGasLimit    = type(uint256).max;
     uint256 totalGasMarket   = 0;
@@ -192,7 +193,7 @@ contract GasBenchmarkTest is Test, OrderTypes {
             console.log("  Gas avg (market) :", totalGasMarket / marketCnt);
 
         console.log("\n=== Per-100-Order Averages (BST growth effect) ===");
-        for (uint256 cp = 0; cp < 10; cp++) {
+        for (uint256 cp = 0; cp < CP_COUNT; cp++) {
             uint256 lo = cp * 100 + 1;
             uint256 hi = (cp + 1) * 100;
             if (cpCnt[cp] > 0) {
@@ -278,7 +279,6 @@ contract GasBenchmarkTest is Test, OrderTypes {
 
         // ── [F] 挂 10 笔进 BST，再撮合一笔，观察 BST 深度影响 ──
         for (uint i = 0; i < 10; i++) {
-            bytes32 rng = keccak256(abi.encodePacked(i, "fill"));
             bool isSell = (i % 2 == 0);
             uint256 price = isSell ? (160e6 + i * 1e6) : (130e6 - i * 1e6);
             vm.prank(traders[i % 4]);
@@ -309,7 +309,7 @@ contract GasBenchmarkTest is Test, OrderTypes {
         // Key components breakdown (approximations)
         // vault.deposit does 2 SSTOREs; internalTransfer inside newOrder also 2 SSTOREs
         // EIP-2929 warm/cold distinction matters here
-        uint256 sstoreCold = 22100;
+        // uint256 sstoreCold = 22100;
         console.log("\n--- SSTORE cost reference ---");
         console.log("  Cold SSTORE (new slot)   : 22100 gas");
         console.log("  Warm SSTORE (existing)   : 2900 gas");

@@ -406,20 +406,18 @@ export const INDEX_ORACLE_ABI = [
   },
 ] as const;
 
-// Position struct: 12 fields matching OrderTypes.sol
+// Position struct fields matching OrderTypes.sol
 const POSITION_COMPONENTS = [
-  { name: 'positionID', type: 'uint256' },
-  { name: 'pool', type: 'address' },
   { name: 'isShort', type: 'bool' },
   { name: 'status', type: 'uint8' },
   { name: 'openMargin', type: 'uint256' },
-  { name: 'pendingSize', type: 'uint256' },
-  { name: 'openSize', type: 'uint256' },
-  { name: 'closeSize', type: 'uint256' },
-  { name: 'openAmount', type: 'uint256' },
-  { name: 'closeAmount', type: 'uint256' },
-  { name: 'openFundingIdx', type: 'uint256' },
-  { name: 'closeFundingIdx', type: 'uint256' },
+  { name: 'pendingSize', type: 'uint128' },
+  { name: 'openSize', type: 'uint128' },
+  { name: 'closeSize', type: 'uint128' },
+  { name: 'openAmount', type: 'uint128' },
+  { name: 'closeAmount', type: 'uint128' },
+  { name: 'openFundingIdx', type: 'uint128' },
+  { name: 'closeFundingIdx', type: 'uint128' },
 ] as const;
 
 export const POSITION_NFT_ABI = [

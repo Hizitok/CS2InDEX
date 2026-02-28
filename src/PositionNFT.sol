@@ -87,7 +87,7 @@ contract positionNFT is OrderTypes, PosERC721 {
             isShort: pOrder.isSell,
             status: posStatus.pendingOpen,
             openMargin: margin,
-            pendingSize: pOrder.size,
+            pendingSize: uint128(pOrder.size),
             openSize: 0,
             closeSize: 0,
             openAmount: 0,

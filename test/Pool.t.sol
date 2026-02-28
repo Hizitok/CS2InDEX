@@ -1060,7 +1060,7 @@ contract MockPosition is IPosition {
             isShort: pOrder.isSell,
             status: posStatus.pendingOpen,
             openMargin: margin,
-            pendingSize: pOrder.size,
+            pendingSize: uint128(pOrder.size),
             openSize: 0,
             closeSize: 0,
             openAmount: 0,

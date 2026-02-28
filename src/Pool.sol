@@ -136,6 +136,11 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         }
     }
 
+    function cvt256(uint128 u128) internal pure returns (int256)
+    {
+        return int256(uint256(u128));
+    }
+
     function _newOrderInternal(address trader, uint256 margin, PoolOrder calldata pOrder)
         internal
         returns (OrderId newPosId)
@@ -312,13 +317,13 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         if (pos.isShort) {
             // Short: profit when sell high, buy low
             // PnL = openAmount - closeAmount + funding change
-            pnl = int256(pos.openAmount) - int256(pos.closeAmount);
-            pnl -= int256(pos.openFundingIdx) - int256(pos.closeFundingIdx);
+            pnl = cvt256(pos.openAmount) - cvt256(pos.closeAmount);
+            pnl -= cvt256(pos.openFundingIdx) - cvt256(pos.closeFundingIdx);
         } else {
             // Long: profit when buy low, sell high
             // PnL = closeAmount - openAmount + funding change
-            pnl = int256(pos.closeAmount) - int256(pos.openAmount);
-            pnl += int256(pos.openFundingIdx) - int256(pos.closeFundingIdx);
+            pnl = cvt256(pos.closeAmount) - cvt256(pos.openAmount);
+            pnl += cvt256(pos.openFundingIdx) - cvt256(pos.closeFundingIdx);
         }
 
         // Convert PnL to currency amount (divide by decimal)
@@ -648,18 +653,21 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         view
         returns (Position memory)
     {
-        uint256 fundingChange = uint256(fillSize * fundingIdx);
+        // Keep intermediate products as uint256 to avoid overflow before the final cast.
+        // Max values: fillSize ~1e8, fillPrice ~2e8 → product ~2e16 << uint128.max(3.4e38)
+        // fundingIdx ~9.2e18 → fundingChange ~9.2e26 << uint128.max
+        uint256 fundingChange = fillSize * fundingIdx;
         if (pos.status == posStatus.pendingOpen) {
-            pos.pendingSize -= fillSize;
-            pos.openSize += fillSize;
-            pos.openAmount += fillSize * fillPrice;
-            pos.openFundingIdx += fundingChange;
+            pos.pendingSize    -= uint128(fillSize);
+            pos.openSize       += uint128(fillSize);
+            pos.openAmount     += uint128(fillSize * fillPrice);
+            pos.openFundingIdx += uint128(fundingChange);
             if (pos.pendingSize == 0) pos.status = posStatus.open;
         } else if (pos.status == posStatus.pendingClose || pos.status == posStatus.liquidating)  {
-            pos.openSize -= fillSize;
-            pos.closeSize += fillSize;
-            pos.closeAmount += fillSize * fillPrice;
-            pos.closeFundingIdx += fundingChange;
+            pos.openSize        -= uint128(fillSize);
+            pos.closeSize       += uint128(fillSize);
+            pos.closeAmount     += uint128(fillSize * fillPrice);
+            pos.closeFundingIdx += uint128(fundingChange);
             if (pos.openSize == 0) pos.status = posStatus.closed;
         } else {
             revert InvalidStatus();
