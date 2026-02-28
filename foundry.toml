@@ -17,6 +17,9 @@ verbosity = 2
 # Gas reports
 gas_reports = ["*"]
 
+# Filesystem permissions (required for vm.writeFile in deploy scripts)
+fs_permissions = [{ access = "read-write", path = "deploy/" }]
+
 # RPC endpoints (add your own)
 [rpc_endpoints]
 mainnet = "${MAINNET_RPC_URL}"
@@ -29,10 +32,14 @@ sepolia = { key = "${ETHERSCAN_API_KEY}" }
 
 # CI profile
 [profile.ci]
-fuzz_runs = 5000
 verbosity = 4
+
+[profile.ci.fuzz]
+runs = 5000
 
 # Local profile for development
 [profile.local]
 verbosity = 3
-fuzz_runs = 100
+
+[profile.local.fuzz]
+runs = 100

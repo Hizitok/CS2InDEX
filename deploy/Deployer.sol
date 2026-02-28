@@ -102,10 +102,10 @@ contract CS2InDEXDeployer {
         router = address(rtr);
         emit Deployed("Router", router);
 
-        // ── Step 5: 给每个 Pool 注册 Router ──────────────────────────────────
-        for (uint256 i = 0; i < 4; i++) {
-            IPool(pools[i]).setRouter(router);
-        }
+        // ── Step 5: 注册 Router（同时授权 Vault.withdrawFor）────────────────
+        // 必须用 fac.setRouter()：Factory.setRouter() 额外执行 Vault.setPool(router, true)
+        // 使 Router 可调用 Vault.withdrawFor()（用户提现路径）
+        fac.setRouter(router);
 
         // ── Step 6: 更新初始 Oracle 价格 ────────────────────────────────────
         for (uint256 i = 0; i < 4; i++) {

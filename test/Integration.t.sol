@@ -945,4 +945,258 @@ contract IntegrationTest is Test, OrderTypes {
         vm.prank(address(factory));
         oracle.applyFundingRate(address(pool));
     }
+
+    /*//////////////////////////////////////////////////////////////
+                    穿叉盘撮合测试 (Crossed Book Matching)
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice 复现真实部署中限价-限价穿叉单不成交的场景
+     * @dev 用真实合约（非 mock）验证：
+     *   1. Trader1 先挂限价买 $105
+     *   2. Trader2 再挂限价卖 $102.50（低于买价，形成穿叉盘）
+     *   3. 断言卖单应作为 taker 与买单撮合成功，两仓位均 open
+     */
+    function testCrossedBook_LimitBuyThenLimitSell_ShouldMatch() public {
+        console.log("\n=== Crossed Book Matching Test ===");
+
+        uint256 BUY_PRICE  = 105e6;   // $105.00
+        uint256 SELL_PRICE = 102_500_000; // $102.50
+        uint256 SIZE       = 1e6;     // 1 unit
+        uint256 MARGIN     = 11000e6; // $11,000 (sufficient for ~10x lev)
+
+        // --- Step 1: Trader1 places limit BUY at $105 ---
+        console.log("Step 1: Trader1 limit buy @ $105");
+        vm.prank(trader1);
+        OrderId buyId = pool.newOrder(MARGIN, PoolOrder({
+            isSell: false,
+            oType:  orderType.Limit,
+            size:   SIZE,
+            price:  BUY_PRICE
+        }));
+
+        // Buy should be resting in the bid tree (no matching sell yet)
+        Position memory buyPos = nft.getPosition(buyId);
+        assertEq(uint256(buyPos.status), uint256(posStatus.pendingOpen),
+            "Buy should be pending (nothing to match)");
+        console.log("  Buy resting, status=pendingOpen [OK]");
+
+        // Verify orderbook: best bid = $105, no ask
+        (, , uint256 bidPx) = pool.getOrderbookInfo();
+        assertEq(bidPx, BUY_PRICE, "Best bid should be $105");
+
+        // --- Step 2: Trader2 places limit SELL at $102.50 ---
+        // This is BELOW the best bid, so it should match immediately
+        console.log("Step 2: Trader2 limit sell @ $102.50 (below bid, should match)");
+        vm.prank(trader2);
+        OrderId sellId = pool.newOrder(MARGIN, PoolOrder({
+            isSell: true,
+            oType:  orderType.Limit,
+            size:   SIZE,
+            price:  SELL_PRICE
+        }));
+
+        // --- Assertions ---
+        buyPos = nft.getPosition(buyId);
+        Position memory sellPos = nft.getPosition(sellId);
+
+        console.log("  Buy  status:", uint256(buyPos.status),  "openSize:", buyPos.openSize);
+        console.log("  Sell status:", uint256(sellPos.status), "openSize:", sellPos.openSize);
+        console.log("  lastPrice  :", pool.getLastPrice() / 1e6);
+
+        // Both positions should be OPEN (fully matched)
+        assertEq(uint256(buyPos.status),  uint256(posStatus.open),
+            "FAIL: buy should be open after match");
+        assertEq(uint256(sellPos.status), uint256(posStatus.open),
+            "FAIL: sell should be open after match");
+        assertEq(buyPos.openSize,  SIZE, "Buy open size mismatch");
+        assertEq(sellPos.openSize, SIZE, "Sell open size mismatch");
+
+        // Fill should have occurred at the MAKER price ($105 — buyer is maker)
+        assertEq(pool.getLastPrice(), BUY_PRICE, "Last price should equal maker (buy) price");
+
+        // Orderbook should now be empty (both orders fully consumed)
+        (uint256 lastPx, uint256 askPx, uint256 bidPx2) = pool.getOrderbookInfo();
+        assertEq(bidPx2, 0, "Bid tree should be empty after full match");
+        assertEq(askPx,  0, "Ask tree should be empty after full match");
+
+        console.log("=== Crossed Book Test PASSED ===\n");
+    }
+
+    /**
+     * @notice 反向：先挂限价卖 $102.50，再挂限价买 $105
+     * @dev 验证买单作为 taker 能匹配到卖单
+     */
+    function testCrossedBook_LimitSellThenLimitBuy_ShouldMatch() public {
+        console.log("\n=== Crossed Book (Sell First) Test ===");
+
+        uint256 BUY_PRICE  = 105e6;
+        uint256 SELL_PRICE = 102_500_000;
+        uint256 SIZE       = 1e6;
+        uint256 MARGIN     = 11000e6;
+
+        // --- Step 1: Trader1 places limit SELL at $102.50 ---
+        console.log("Step 1: Trader1 limit sell @ $102.50");
+        vm.prank(trader1);
+        OrderId sellId = pool.newOrder(MARGIN, PoolOrder({
+            isSell: true,
+            oType:  orderType.Limit,
+            size:   SIZE,
+            price:  SELL_PRICE
+        }));
+
+        Position memory sellPos = nft.getPosition(sellId);
+        assertEq(uint256(sellPos.status), uint256(posStatus.pendingOpen),
+            "Sell should be resting (nothing to match)");
+        console.log("  Sell resting [OK]");
+
+        // --- Step 2: Trader2 places limit BUY at $105 ---
+        console.log("Step 2: Trader2 limit buy @ $105 (above ask, should match)");
+        vm.prank(trader2);
+        OrderId buyId = pool.newOrder(MARGIN, PoolOrder({
+            isSell: false,
+            oType:  orderType.Limit,
+            size:   SIZE,
+            price:  BUY_PRICE
+        }));
+
+        sellPos = nft.getPosition(sellId);
+        Position memory buyPos  = nft.getPosition(buyId);
+
+        console.log("  Sell status:", uint256(sellPos.status), "openSize:", sellPos.openSize);
+        console.log("  Buy  status:", uint256(buyPos.status),  "openSize:", buyPos.openSize);
+        console.log("  lastPrice  :", pool.getLastPrice() / 1e6);
+
+        assertEq(uint256(sellPos.status), uint256(posStatus.open),
+            "FAIL: sell should be open after match");
+        assertEq(uint256(buyPos.status),  uint256(posStatus.open),
+            "FAIL: buy should be open after match");
+
+        // Fill at MAKER price = sell price ($102.50, seller is maker)
+        assertEq(pool.getLastPrice(), SELL_PRICE, "Last price should equal maker (sell) price");
+
+        console.log("=== Sell-First Test PASSED ===\n");
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                    清算价格诊断测试
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice 验证清算引擎的实际触发价 = relativePx + fundingIdx
+     * @dev 手动计算触发价并与 getTriggerPx() 对比，再用 oracle 跌价触发清算
+     *
+     *  场景：size=10 units @ $100, margin=$200 (5x 杠杆)
+     *   - MAINTENANCE_RATE = 2000 / 10000 = 20%
+     *   - maxLoss (trigger) = openMargin * 80%
+     *   - relativePx = (openAmount - openFundingIdx - maxLoss * 1e6) / openSize
+     *   - actualTrigger = relativePx + fundingIdx
+     *
+     *  若 fundingIdx = 1<<63 (~9.22e18)，则：
+     *   - openFundingIdx = fillSize * fundingIdx ≈ 9.22e25  (far exceeds openAmount)
+     *   - relativePx ≈ -9.22e18
+     *   - actualTrigger ≈ -9.22e18 + 9.22e18 ≈ 小整数（~84）
+     *   => 触发价事实上等于零，任何正数 markPrice 都不会触发清算 → BUG
+     *
+     *  若 fundingIdx = 0（正确初值），则：
+     *   - openFundingIdx = 0
+     *   - relativePx = (openAmount - maxLoss*1e6) / openSize ≈ $84
+     *   - actualTrigger ≈ $84 → price drop to $80 正常触发清算
+     */
+    function testLiquidation_FundingIdxEffect() public {
+        console.log("\n=== Liquidation fundingIdx Effect Test ===\n");
+
+        LiquidationEngine engine = LiquidationEngine(liquidationEngine);
+
+        // 0. Log current fundingIdx
+        uint256 fIdx = pool.fundingIdx();
+        console.log("Pool.fundingIdx()  :", fIdx);
+        console.log("Expected (1<<63)   :", uint256(1 << 63));
+
+        // 1. Open 5x long/short at $100, margin $200
+        (OrderId longId, OrderId shortId) = _openMatchedPositions(10e6, 100e6, 200e6);
+        assertTrue(nft.getPosition(longId).status == posStatus.open,  "Long should be open");
+        assertTrue(nft.getPosition(shortId).status == posStatus.open, "Short should be open");
+
+        // 2. Compute and assert trigger price
+        _assertTriggerPrice(engine, longId, fIdx);
+
+        // 3. Crash price and liquidate
+        _crashAndLiquidate(engine, longId, shortId);
+
+        console.log("\n=== Liquidation Test Complete ===\n");
+    }
+
+    function _openMatchedPositions(uint256 size, uint256 price, uint256 margin)
+        internal
+        returns (OrderId longId, OrderId shortId)
+    {
+        vm.prank(trader1);
+        longId = pool.newOrder(margin, PoolOrder({
+            isSell: false, oType: orderType.Limit,
+            size: size, price: price
+        }));
+        vm.prank(trader2);
+        shortId = pool.newOrder(margin, PoolOrder({
+            isSell: true, oType: orderType.Market,
+            size: size, price: 0
+        }));
+    }
+
+    function _assertTriggerPrice(LiquidationEngine engine, OrderId longId, uint256 fIdx) internal {
+        Position memory pos = nft.getPosition(longId);
+        console.log("\nLong position data:");
+        console.log("  openAmount     :", pos.openAmount);
+        console.log("  openFundingIdx :", pos.openFundingIdx);
+        console.log("  openSize       :", pos.openSize);
+        console.log("  openMargin     :", pos.openMargin);
+
+        // Manual trigger: maxLoss = 80% of margin; relativePx = (amount - fundingIdx - loss) / size
+        uint256 maxLoss   = pos.openMargin * 8000 / 10000;
+        int256 base       = int256(pos.openAmount) - int256(pos.openFundingIdx);
+        int256 relativePx = (base - int256(maxLoss * 1e6)) / int256(pos.openSize);
+        uint256 actualTrigger = uint256(relativePx + int256(fIdx));
+
+        console.log("\nManual trigger:");
+        console.log("  maxLoss       :", maxLoss);
+        console.log("  relativePx    :", relativePx);
+        console.log("  actualTrigger :", actualTrigger);
+        console.log("  getTriggerPx  :", engine.getTriggerPx(longId));
+
+        assertEq(engine.getTriggerPx(longId), actualTrigger, "getTriggerPx mismatch");
+
+        // For 5x leverage at $100, correct trigger is ~$84
+        // With fundingIdx=1<<63 bug, actualTrigger collapses to ~0
+        console.log("  triggerPx ($) :", actualTrigger / 1e6);
+        assertTrue(actualTrigger >= 80e6 && actualTrigger <= 95e6,
+            "Trigger price should be $80-$95 for 5x lev (fundingIdx bug => ~0 => FAIL)");
+    }
+
+    function _crashAndLiquidate(LiquidationEngine engine, OrderId longId, OrderId shortId) internal {
+        console.log("\nCrashing oracle to $80...");
+        vm.prank(address(factory));
+        oracle.updateIndexPrice(address(pool), 80e6);
+
+        bool liquidatable = engine.isLiquidatable(longId);
+        console.log("isLiquidatable at $80:", liquidatable);
+        assertTrue(liquidatable, "Long MUST be liquidatable at $80 with 5x leverage");
+
+        // Provide buy-side liquidity ABOVE the bankruptcy price (~$80.30)
+        // Liquidation places a sell at $80.30; counterparty bid must be >= $80.30 to match
+        vm.prank(trader3);
+        pool.newOrder(5000e6, PoolOrder({
+            isSell: false, oType: orderType.Limit,
+            size: 10e6, price: 82e6
+        }));
+
+        engine.liquidate();
+
+        Position memory longAfter = nft.getPosition(longId);
+        console.log("Long status after liquidation:", uint256(longAfter.status));
+        assertTrue(
+            longAfter.status == posStatus.closed || longAfter.status == posStatus.settled,
+            "Long MUST be closed/settled after liquidation"
+        );
+        assertTrue(nft.getPosition(shortId).status == posStatus.open, "Short should still be open");
+    }
 }

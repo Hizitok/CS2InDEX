@@ -13,7 +13,7 @@ import { formatUnits, parseUnits } from 'viem';
 import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { POOL_ABI, PX_DECIMALS, ORDER_TYPE } from '@/config/contracts';
 import toast from 'react-hot-toast';
-import { TrendingUp, TrendingDown, X, Info, ShieldAlert } from 'lucide-react';
+import { TrendingUp, TrendingDown, X, ShieldAlert, Ban, Coins } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 /**
@@ -24,7 +24,7 @@ interface Position {
   positionID: bigint;
   pool: string;
   isShort: boolean;
-  status: number; // 0=none, 1=pendingOpen, 2=open, 3=pendingClose, 4=liquidating, 5=closed, 6=settled
+  status: number; // 0=none,1=pendingOpen,2=open,3=pendingClose,4=liquidating,5=closed,6=settled
   openMargin: bigint;
   pendingSize: bigint;
   openSize: bigint;
@@ -86,6 +86,28 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
     return pnlPerUnit * size;
   };
 
+  /** 撤单 (pendingOpen → closed) */
+  const handleCancel = () => {
+    writeContract({
+      address: position.pool as `0x${string}`,
+      abi: POOL_ABI,
+      functionName: 'cancelOrder',
+      args: [tokenId],
+    });
+    toast.loading('撤单请求已提交，等待确认...');
+  };
+
+  /** 结算盈亏 (closed → settled) */
+  const handleSettle = () => {
+    writeContract({
+      address: position.pool as `0x${string}`,
+      abi: POOL_ABI,
+      functionName: 'settlePnL',
+      args: [tokenId],
+    });
+    toast.loading('结算请求已提交，等待确认...');
+  };
+
   /**
    * 提交平仓请求
    */
@@ -140,20 +162,46 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
                 </span>
               </div>
               <div className="text-xs text-gray-500 mt-1 flex items-center gap-1">
-                {t.positions.status[position.status as 0 | 1 | 2 | 3 | 4 | 5]}
+                {t.positions.status[position.status as 0 | 1 | 2 | 3 | 4 | 5 | 6]}
                 {position.status === 2 && <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
               </div>
             </div>
           </div>
 
-          {position.status === 2 && (
-            <button
-              onClick={() => setShowCloseModal(true)}
-              className="px-4 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all text-sm font-medium"
-            >
-              {t.positions.close}
-            </button>
-          )}
+          <div className="flex gap-2">
+            {/* Cancel: pendingOpen */}
+            {position.status === 1 && (
+              <button
+                onClick={handleCancel}
+                disabled={isConfirming}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-yellow-500/30 text-yellow-400 hover:bg-yellow-500/10 hover:border-yellow-500/50 transition-all text-sm font-medium disabled:opacity-50"
+              >
+                <Ban size={14} />
+                {t.positions.cancel}
+              </button>
+            )}
+            {/* Close: open */}
+            {position.status === 2 && (
+              <button
+                onClick={() => setShowCloseModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 text-red-400 hover:bg-red-500/10 hover:border-red-500/50 transition-all text-sm font-medium"
+              >
+                <X size={14} />
+                {t.positions.close}
+              </button>
+            )}
+            {/* Settle PnL: closed */}
+            {position.status === 5 && (
+              <button
+                onClick={handleSettle}
+                disabled={isConfirming}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-500/30 text-blue-400 hover:bg-blue-500/10 hover:border-blue-500/50 transition-all text-sm font-medium disabled:opacity-50"
+              >
+                <Coins size={14} />
+                {t.positions.settle}
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-bedrock-900/50 p-4 rounded-xl border border-white/5">

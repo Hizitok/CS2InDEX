@@ -71,7 +71,7 @@ contract Deploy is Script {
         // ── Step 1: USDC ──────────────────────────────────────────────────────
         if (usdcEnv == address(0)) {
             // 测试网：部署 MockUSDC 并给部署者 mint
-            TestERC20 mock = new TestERC20("USD Coin", "USDC", 6);
+            TestERC20 mock = new TestERC20("Mock USDC", "USDC", 6);
             uint256 mintAmount = vm.envOr("DEPLOYER_MINT", uint256(1_000_000e6));
             mock.mint(deployer, mintAmount);
             usdc = address(mock);

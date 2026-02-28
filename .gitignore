@@ -57,3 +57,6 @@ coverage/
 
 # TypeScript build info cache
 *.tsbuildinfo
+
+# Deploy
+deployed*.json

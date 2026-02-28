@@ -62,13 +62,15 @@ case "$NETWORK" in
   sepolia)
     RPC_URL="${SEPOLIA_RPC_URL:-}"
     [[ -z "$RPC_URL" ]] && error "未设置 SEPOLIA_RPC_URL"
-    VERIFY_FLAG="--verify"
+    VERIFY_FLAG=""
+    [[ -n "${ETHERSCAN_API_KEY:-}" ]] && VERIFY_FLAG="--verify" || warn "未设置 ETHERSCAN_API_KEY，跳过合约验证"
     EXTRA_FLAGS=""
     ;;
   mainnet)
     RPC_URL="${MAINNET_RPC_URL:-}"
     [[ -z "$RPC_URL" ]] && error "未设置 MAINNET_RPC_URL"
-    VERIFY_FLAG="--verify"
+    VERIFY_FLAG=""
+    [[ -n "${ETHERSCAN_API_KEY:-}" ]] && VERIFY_FLAG="--verify" || warn "未设置 ETHERSCAN_API_KEY，跳过合约验证"
     EXTRA_FLAGS="--slow"  # 主网加 --slow 防止 nonce 竞争
     warn "主网部署！10 秒后继续，Ctrl+C 取消..."
     sleep 10
@@ -117,7 +119,7 @@ fi
 info "开始部署到 $NETWORK ..."
 echo ""
 
-# 构建 forge script 命令
+# 构建 forge script 命令（不含 --verify，单独处理验证）
 FORGE_CMD=(
   forge script deploy/Deploy.s.sol
   --rpc-url "$RPC_URL"
@@ -126,13 +128,7 @@ FORGE_CMD=(
   -vvvv
 )
 
-[[ -n "$VERIFY_FLAG" ]]  && FORGE_CMD+=("$VERIFY_FLAG")
-[[ -n "$EXTRA_FLAGS" ]]  && FORGE_CMD+=($EXTRA_FLAGS)
-
-# Etherscan 验证 key
-if [[ -n "${ETHERSCAN_API_KEY:-}" && -n "$VERIFY_FLAG" ]]; then
-  FORGE_CMD+=(--etherscan-api-key "$ETHERSCAN_API_KEY")
-fi
+[[ -n "$EXTRA_FLAGS" ]] && FORGE_CMD+=($EXTRA_FLAGS)
 
 # 主网 USDC 地址（如有设置）
 if [[ -n "${USDC_ADDRESS:-}" ]]; then
@@ -140,6 +136,17 @@ if [[ -n "${USDC_ADDRESS:-}" ]]; then
 fi
 
 "${FORGE_CMD[@]}" || error "部署失败"
+
+# ── 合约验证（可选，需要 ETHERSCAN_API_KEY）────────────────────────────────
+if [[ -n "$VERIFY_FLAG" && -n "${ETHERSCAN_API_KEY:-}" ]]; then
+  info "验证合约（Etherscan）..."
+  forge script deploy/Deploy.s.sol \
+    --rpc-url "$RPC_URL" \
+    --verify \
+    --etherscan-api-key "$ETHERSCAN_API_KEY" \
+    --resume \
+    || warn "合约验证失败（不影响部署），可稍后手动验证"
+fi
 
 echo ""
 success "部署完成！"

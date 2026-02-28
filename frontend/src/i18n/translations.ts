@@ -128,13 +128,16 @@ export const translations = {
             closeModalTitle: 'Close Position',
             closePrice: 'Close Price',
             confirmClose: 'Confirm Close',
+            cancel: 'Cancel Order',
+            settle: 'Settle PnL',
             status: {
                 0: 'None',
                 1: 'Pending Open',
                 2: 'Open',
                 3: 'Pending Close',
-                4: 'Force Close',
+                4: 'Liquidating',
                 5: 'Closed',
+                6: 'Settled',
             }
         },
         docs: {
@@ -290,13 +293,16 @@ export const translations = {
             closeModalTitle: '平仓确认',
             closePrice: '平仓价格',
             confirmClose: '确认平仓',
+            cancel: '撤单',
+            settle: '结算盈亏',
             status: {
                 0: '无',
                 1: '开仓中',
                 2: '持仓中',
                 3: '平仓中',
-                4: '强平',
+                4: '强平中',
                 5: '已平仓',
+                6: '已结算',
             }
         },
         docs: {

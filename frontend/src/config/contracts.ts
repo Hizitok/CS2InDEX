@@ -1,13 +1,13 @@
 // Contract addresses - Update these after deployment
 // deploy.sh auto-updates FACTORY, VAULT, USDC, ROUTER, NFT, POOL after running
 export const CONTRACTS = {
-  VAULT: '0x...' as `0x${string}`,
-  FACTORY: '0x...' as `0x${string}`,
-  USDC: '0x...' as `0x${string}`,
-  ROUTER: '0x...' as `0x${string}`,
-  NFT: '0x...' as `0x${string}`,
-  // Primary pool (CS2-Global-Index). Update after deployment.
-  POOL: '0x...' as `0x${string}`,
+  VAULT:   '0xB4E8b6406aA9D66Aa89a0C3E9D2f28aC83fA98f1' as `0x${string}`,
+  FACTORY: '0xcf0D95940dfFd572Ad2A5869f8b7124D29A51b51' as `0x${string}`,
+  USDC:    '0x32B7cD7b27F12ad40e6A13afbD7AD18800d126b2' as `0x${string}`,
+  ROUTER:  '0xfb6517720150d5bB397255C9fA7c11a4A7be5Aab' as `0x${string}`,
+  NFT:     '0x9247dcB27e05ed29f136356894AA5c0829aB6794' as `0x${string}`,
+  // Primary pool (CS2-Global-Index) — chain 1301 (unichain-sepolia)
+  POOL:    '0x237168D3B88df7b9f4CB32a9D25c911d23a7E1f1' as `0x${string}`,
 } as const;
 
 // Price decimals (aligned with USDC = 6)
