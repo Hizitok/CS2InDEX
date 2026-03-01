@@ -64,22 +64,33 @@ export const POOL_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  // Custom errors — lets viem decode revert reasons by name
+  { type: 'error', name: 'FOK',              inputs: [] },
+  { type: 'error', name: 'PxOverflow',       inputs: [] },
+  { type: 'error', name: 'PxUnderflow',      inputs: [] },
+  { type: 'error', name: 'LeverageOverflow', inputs: [] },
+  { type: 'error', name: 'CancelFailed',     inputs: [] },
+  { type: 'error', name: 'InvalidMatch',     inputs: [] },
+  { type: 'error', name: 'InvalidOracle',    inputs: [] },
+  { type: 'error', name: 'InvalidStatus',    inputs: [] },
+  { type: 'error', name: 'NotAuthorized',    inputs: [] },
+  { type: 'error', name: 'InvalidOrder',     inputs: [] },
+  { type: 'error', name: 'PosNotExist',      inputs: [] },
 ] as const;
 
-// positionNFT ABI — only getPosition
+// positionNFT ABI — only what the market maker needs.
+// Fields must exactly match OrderTypes.sol Position struct (no positionID/pool).
 const POSITION_COMPONENTS = [
-  { name: 'positionID',     type: 'uint256' },
-  { name: 'pool',           type: 'address' },
-  { name: 'isShort',        type: 'bool'    },
-  { name: 'status',         type: 'uint8'   },
-  { name: 'openMargin',     type: 'uint256' },
-  { name: 'pendingSize',    type: 'uint256' },
-  { name: 'openSize',       type: 'uint256' },
-  { name: 'closeSize',      type: 'uint256' },
-  { name: 'openAmount',     type: 'uint256' },
-  { name: 'closeAmount',    type: 'uint256' },
-  { name: 'openFundingIdx', type: 'uint256' },
-  { name: 'closeFundingIdx',type: 'uint256' },
+  { name: 'isShort',         type: 'bool'    },
+  { name: 'status',          type: 'uint8'   },
+  { name: 'openMargin',      type: 'uint256' },
+  { name: 'pendingSize',     type: 'uint128' },
+  { name: 'openSize',        type: 'uint128' },
+  { name: 'closeSize',       type: 'uint128' },
+  { name: 'openAmount',      type: 'uint128' },
+  { name: 'closeAmount',     type: 'uint128' },
+  { name: 'openFundingIdx',  type: 'uint128' },
+  { name: 'closeFundingIdx', type: 'uint128' },
 ] as const;
 
 export const POSITION_NFT_ABI = [
@@ -97,6 +108,14 @@ export const POSITION_NFT_ABI = [
       { name: 'tokenIds', type: 'uint256[]' },
       { name: 'positions', type: 'tuple[]', components: POSITION_COMPONENTS },
     ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  // Returns the pool address that owns/created a position NFT
+  {
+    inputs: [{ name: 'orderId', type: 'uint256' }],
+    name: 'getPool',
+    outputs: [{ name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },

@@ -172,6 +172,8 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         OBPx[newPosId] = properPx(pOrder);
         OBSize[newPosId] = pOrder.size;
 
+        emit OrderCreated(newPosId, trader, pOrder.isSell, pOrder.size, OBPx[newPosId]);
+
         orderMatching(newPosId, pOrder);
     }
 
@@ -352,6 +354,10 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
 
         // Mark position as settled in NFT contract
         IPosition(positionNFT).settlePosition(orderId);
+
+        // fees were already deducted from openMargin during matching; not tracked per-position
+        emit PositionClosed(orderId, owner, pnlAmount);
+        emit PnLSettled(orderId, owner, pnlAmount);
     }
 
 
@@ -387,7 +393,9 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
      */
     function updateOraclePrice(uint256 newPrice) external onlyOracle
     {
+        uint256 oldPrice = oraclePrice;
         oraclePrice = newPrice;
+        emit OraclePriceUpdated(oldPrice, newPrice);
     }
 
     /**
@@ -502,6 +510,7 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         uint256 amount = feeCollected;
         feeCollected = 0;
         IVault(vault).internalTransfer(address(this), to, amount);
+        emit FeesCollected(to, amount);
     }
 
     // ------------ Internal Function Part ------------ //
@@ -536,7 +545,10 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
             }
         }
         IPosition(positionNFT).updatePosition(takerId, takerPos);
-        if (_size==0) return;
+        if (_size==0) {
+            emit ORDER_FILLED();
+            return;
+        }
 
         // CHECK Fill or Kill Order
         if (pOrder.oType == orderType.FOK) {
@@ -544,11 +556,13 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         }
         // CHECK Immediately or Cancelled
         if (pOrder.oType == orderType.IOC) {
+            emit IOC();
             cancelOrder(takerId);
         }
         // Market orders: cancel any unfilled remainder so margin is never trapped.
         // Market orders are never inserted into the tree, so cancelOrder skips tree removal.
         if (pOrder.oType == orderType.Market) {
+            emit MARKET();
             cancelOrder(takerId);
         }
         // Making new orders
@@ -641,6 +655,7 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
             settlePnL(makerID);
         }
         lastPrice = fillPx;
+        emit OrderMatched(takerID, makerID, fillSz, fillPx);
 
         // Notify oracle of trade for funding rate calculation
         IOracle(oracle).updatePoolInfo(fillSz, fillPx);
@@ -711,7 +726,16 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         _bid1Price = (bidMaxKey != 0) ? OBPx[OrderId.wrap(bidMaxKey)] : 0;
     }
 
-    /** 
+    /**
+     * @notice Get the limit price stored in the order book for a given order ID.
+     * @dev    Returns 0 if the order has been cancelled or never existed.
+     *         Market sell orders store 0; market buy orders store type(uint128).max.
+     */
+    function getOrderPrice(uint256 orderId) external view returns (uint256) {
+        return OBPx[OrderId.wrap(orderId)];
+    }
+
+    /**
      * @notice Get Pool information
 
     */

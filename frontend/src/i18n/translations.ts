@@ -132,6 +132,8 @@ export const translations = {
             confirmClose: 'Confirm Close',
             cancel: 'Cancel Order',
             settle: 'Settle PnL',
+            hideSettled: 'Hide Settled',
+            showSettled: 'Show Settled',
             status: {
                 0: 'None',
                 1: 'Pending Open',
@@ -299,6 +301,8 @@ export const translations = {
             confirmClose: '确认平仓',
             cancel: '撤单',
             settle: '结算盈亏',
+            hideSettled: '隐藏已结算',
+            showSettled: '显示已结算',
             status: {
                 0: '无',
                 1: '开仓中',

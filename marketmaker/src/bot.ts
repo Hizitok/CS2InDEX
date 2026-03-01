@@ -62,6 +62,15 @@ export class MarketMaker {
         }) as WalletClient;
     }
 
+    // ── Write serialization queue (prevents nonce conflicts on concurrent writes) ─
+    // Each writePool call chains onto this promise so writes are always sequential.
+    private writeQueue: Promise<unknown> = Promise.resolve();
+
+    // posIds for which a market-close was submitted but not yet confirmed on-chain.
+    // Prevents closeOrphanPositions from re-submitting closes every tick while
+    // a previous close tx is still in flight (RPC may still show status=open).
+    private orphanCloseInProgress = new Set<bigint>();
+
     // ── Public entry ────────────────────────────────────────────────────────────
 
     async run() {
@@ -115,12 +124,11 @@ export class MarketMaker {
         const step = CONFIG.gridStep;
         const n = CONFIG.gridLevels;
 
-        const promises: Promise<void>[] = [];
+        // Sequential — parallel placement causes nonce conflicts.
         for (let i = 1; i <= n; i++) {
-            promises.push(this.placeGridOrder('buy',  mid - step * i));
-            promises.push(this.placeGridOrder('sell', mid + step * i));
+            await this.placeGridOrder('buy',  mid - step * i).catch(e => warn(`refreshGrid buy ${i} failed:`, e));
+            await this.placeGridOrder('sell', mid + step * i).catch(e => warn(`refreshGrid sell ${i} failed:`, e));
         }
-        await Promise.allSettled(promises);
     }
 
     private async fillMissingSlots(mid: number) {
@@ -290,7 +298,7 @@ export class MarketMaker {
      */
     async closeOrphanPositions(): Promise<void> {
         let result: [readonly bigint[], readonly {
-            positionID: bigint; pool: string; isShort: boolean; status: number;
+            isShort: boolean; status: number;
             openMargin: bigint; pendingSize: bigint; openSize: bigint; closeSize: bigint;
             openAmount: bigint; closeAmount: bigint;
             openFundingIdx: bigint; closeFundingIdx: bigint;
@@ -310,6 +318,25 @@ export class MarketMaker {
 
         const [tokenIds, positions] = result;
 
+        // Batch-lookup pool address for each position in parallel
+        const poolAddrs = await Promise.all(
+            tokenIds.map(id => this.pub.readContract({
+                address: positionNFTAddress,
+                abi: POSITION_NFT_ABI,
+                functionName: 'getPool',
+                args: [id],
+            }) as Promise<`0x${string}`>)
+        );
+
+        // Clear orphanCloseInProgress for any posId no longer in open state
+        // (it has been mined as pendingClose/closed, or the NFT was burned)
+        const openPosIds = new Set<bigint>(
+            tokenIds.filter((_, i) => positions[i].status === POS_STATUS.open)
+        );
+        for (const id of this.orphanCloseInProgress) {
+            if (!openPosIds.has(id)) this.orphanCloseInProgress.delete(id);
+        }
+
         // Build set of posIds already tracked with a pending-close
         const pendingClose = new Set<bigint>(
             [...this.slots.values()]
@@ -324,14 +351,17 @@ export class MarketMaker {
 
             // Only target fully open positions on this pool
             if (pos.status !== POS_STATUS.open) continue;
-            if (pos.pool.toLowerCase() !== CONFIG.poolAddress.toLowerCase()) continue;
+            if (poolAddrs[i].toLowerCase() !== CONFIG.poolAddress.toLowerCase()) continue;
             if (pendingClose.has(posId)) continue;
+            if (this.orphanCloseInProgress.has(posId)) continue; // close already in flight
 
             // Long (isShort=false) → close with sell (isSell=true)
             // Short (isShort=true) → close with buy  (isSell=false)
             const isSell = !pos.isShort;
             log(`Self-trade close: posId=${posId} ${pos.isShort ? 'short' : 'long'} size=${pos.openSize}`);
 
+            // Mark as in-flight BEFORE submitting so concurrent ticks don't double-send
+            this.orphanCloseInProgress.add(posId);
             try {
                 await this.writePool('closePosition', [
                     posId,
@@ -345,6 +375,8 @@ export class MarketMaker {
                 closed++;
                 log(`  → closed posId=${posId}`);
             } catch (e) {
+                // Remove from in-flight on failure so the next tick can retry
+                this.orphanCloseInProgress.delete(posId);
                 warn(`  self-trade close failed for posId=${posId}:`, e);
             }
         }
@@ -391,7 +423,7 @@ export class MarketMaker {
                 functionName: 'getPosition',
                 args: [posId],
             }) as {
-                positionID: bigint; pool: string; isShort: boolean; status: number;
+                isShort: boolean; status: number;
                 openMargin: bigint; pendingSize: bigint; openSize: bigint; closeSize: bigint;
                 openAmount: bigint; closeAmount: bigint;
                 openFundingIdx: bigint; closeFundingIdx: bigint;
@@ -403,9 +435,17 @@ export class MarketMaker {
         }
     }
 
-    // Generic pool write — returns the uint256 return value if any
-    private async writePool(functionName: string, args: unknown[]): Promise<unknown> {
-        const { request } = await this.pub.simulateContract({
+    // Generic pool write — returns the contract's return value (via simulateContract).
+    // Serialized through writeQueue to prevent nonce conflicts on concurrent calls.
+    private writePool(functionName: string, args: unknown[]): Promise<unknown> {
+        const next = this.writeQueue.then(() => this._doWrite(functionName, args));
+        // Swallow errors in the queue chain so subsequent writes still proceed
+        this.writeQueue = next.catch(() => {});
+        return next;
+    }
+
+    private async _doWrite(functionName: string, args: unknown[]): Promise<unknown> {
+        const { request, result } = await this.pub.simulateContract({
             address: CONFIG.poolAddress,
             abi: POOL_ABI,
             functionName: functionName as any,
@@ -416,9 +456,25 @@ export class MarketMaker {
         const receipt = await this.pub.waitForTransactionReceipt({ hash });
         if (receipt.status !== 'success') throw new Error(`tx reverted: ${hash}`);
 
-        // Decode return value from the first log or just return hash for now
-        // (viem simulateContract gives us the result)
-        return (request as any).result ?? hash;
+        // For newOrder: parse the actual posId from the NFT Transfer(mint) event.
+        // simulateContract result can lag on distributed RPC nodes — the next tx's
+        // simulation may see stale tokenCount and return the same posId as the previous tx.
+        if (functionName === 'newOrder') {
+            // ERC721 Transfer: keccak256("Transfer(address,address,uint256)")
+            const TRANSFER_SIG = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
+            const ZERO_TOPIC   = '0x0000000000000000000000000000000000000000000000000000000000000000';
+            const mintLog = receipt.logs.find(log =>
+                log.address.toLowerCase() === positionNFTAddress.toLowerCase() &&
+                log.topics[0] === TRANSFER_SIG &&
+                log.topics[1] === ZERO_TOPIC          // from = address(0) → mint
+            );
+            if (mintLog?.topics[3]) {
+                return BigInt(mintLog.topics[3]);
+            }
+            warn('newOrder: no NFT mint event found in receipt, falling back to simulation result');
+        }
+
+        return result;
     }
 
     private async initPositionNFT() {

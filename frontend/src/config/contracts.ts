@@ -1,13 +1,13 @@
 // Contract addresses - Update these after deployment
 // deploy.sh auto-updates FACTORY, VAULT, USDC, ROUTER, NFT, POOL after running
 export const CONTRACTS = {
-  VAULT:   '0x2460432A0d14Fe8183d5F8037fb496F5736BafAB' as `0x${string}`,
-  FACTORY: '0x18948fdcb24467bcFF7F8eB8E3F6049D7Fb1a45E' as `0x${string}`,
-  USDC:    '0xFa566a90408f7ff22dA1eafEd8566050d9d4264d' as `0x${string}`,
-  ROUTER:  '0xF81f364200CC7F52Bc36B8896dE7f9a122388541' as `0x${string}`,
-  NFT:     '0xDff9475601BC75df21364f051025aC9a00665e0D' as `0x${string}`,
+  VAULT:   '0xe0c45Ec696231DF891d4A4eA34Bd3F132b1CA5B2' as `0x${string}`,
+  FACTORY: '0xFeC51Ce8694f04AB585D1b00A67cCb8c2f9bb3e3' as `0x${string}`,
+  USDC:    '0xa260796BcDE227d2460A21dbCc3D116cafc9A3D6' as `0x${string}`,
+  ROUTER:  '0xE13056d8d0b00000468e8aff83bBaff9Bb50340a' as `0x${string}`,
+  NFT:     '0x4162e92431f212b845dEAC2Af96DD0206dc5Ba60' as `0x${string}`,
   // Primary pool (CS2-Global-Index) — chain 1301 (unichain-sepolia)
-  POOL:    '0xB3E3E4B364Dd655Ef531d47899b052c6c46644d8' as `0x${string}`,
+  POOL:    '0x8d7f83eD4849Ded78E727AA4b954c4a11f0830Df' as `0x${string}`,
 } as const;
 
 // Price decimals (aligned with USDC = 6)
@@ -196,6 +196,14 @@ export const POOL_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  // getOrderPrice(uint256 orderId) => uint256 — limit price stored in OBPx for a pending order
+  {
+    inputs: [{ name: 'orderId', type: 'uint256' }],
+    name: 'getOrderPrice',
+    outputs: [{ name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
   // getDepth(uint256 nLevels) => (askPrices, askSizes, bidPrices, bidSizes)
   {
     inputs: [{ name: 'nLevels', type: 'uint256' }],
@@ -248,7 +256,6 @@ export const POOL_ABI = [
       { indexed: true, name: 'orderId', type: 'uint256' },
       { indexed: true, name: 'trader', type: 'address' },
       { indexed: false, name: 'pnl', type: 'int256' },
-      { indexed: false, name: 'fees', type: 'uint256' },
     ],
     name: 'PnLSettled',
     type: 'event',
@@ -428,6 +435,30 @@ const POSITION_COMPONENTS = [
   { name: 'closeAmount', type: 'uint128' },
   { name: 'openFundingIdx', type: 'uint128' },
   { name: 'closeFundingIdx', type: 'uint128' },
+] as const;
+
+// Router ABI — single entry-point for all trading operations
+export const ROUTER_ABI = [
+  // getPortfolio(address user) returns PositionView[]
+  // PositionView { pool, posId, pos, oraclePrice }
+  {
+    inputs: [{ name: 'user', type: 'address' }],
+    name: 'getPortfolio',
+    outputs: [
+      {
+        components: [
+          { name: 'pool',        type: 'address' },
+          { name: 'posId',       type: 'uint256' },
+          { components: POSITION_COMPONENTS, name: 'pos', type: 'tuple' },
+          { name: 'oraclePrice', type: 'uint256' },
+        ],
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ] as const;
 
 export const POSITION_NFT_ABI = [

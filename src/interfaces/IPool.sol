@@ -29,7 +29,7 @@ interface IPool is OrderTypes {
     event OrderMatched(OrderId indexed orderId, OrderId indexed matchedOrderId, uint256 size, uint256 price);
     event OrderCancelled(OrderId indexed orderId, address indexed trader);
     event PositionClosed(OrderId indexed orderId, address indexed trader, int256 pnl);
-    event PnLSettled(OrderId indexed orderId, address indexed trader, int256 pnl, uint256 fees);
+    event PnLSettled(OrderId indexed orderId, address indexed trader, int256 pnl);
     event FeesCollected(address indexed collector, uint256 amount);
     event OraclePriceUpdated(uint256 oldPrice, uint256 newPrice);
 
@@ -148,6 +148,13 @@ interface IPool is OrderTypes {
      * @return Last price multiplied by 100
      */
     function getLastPrice() external view returns (uint256);
+
+    /**
+     * @notice Get the raw order-book price for a pending order
+     * @param orderId The position NFT ID of the order
+     * @return The stored limit price (0 if cancelled / not in book)
+     */
+    function getOrderPrice(uint256 orderId) external view returns (uint256);
 
     function setEngine(address _engine) external;
 

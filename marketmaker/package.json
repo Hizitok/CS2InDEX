@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts"
+    "dev": "ts-node src/index.ts",
+    "wallet": "ts-node src/wallet-info.ts"
   },
   "dependencies": {
     "viem": "^2.0.0",

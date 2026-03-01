@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 import { formatUnits, parseUnits } from 'viem';
-import { useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi';
 import { POOL_ABI, PX_DECIMALS, ORDER_TYPE } from '@/config/contracts';
 import toast from 'react-hot-toast';
 import { TrendingUp, TrendingDown, X, ShieldAlert, Ban, Coins } from 'lucide-react';
@@ -55,6 +55,18 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
   const { writeContract, data: hash, error: writeError } = useWriteContract();
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash });
 
+  // For pendingOpen positions, fetch the limit price from the order book
+  const { data: rawOrderPrice } = useReadContract({
+    address: position.pool as `0x${string}`,
+    abi: POOL_ABI,
+    functionName: 'getOrderPrice',
+    args: [tokenId],
+    query: { enabled: position.status === 1 },
+  });
+  // Convert raw on-chain price (6 decimals) to human-readable; null if not yet loaded
+  const orderBookPrice: number | null =
+    rawOrderPrice != null ? Number(rawOrderPrice) / 10 ** PX_DECIMALS : null;
+
   // --- 数据计算 (Data Calculation) ---
 
   // 1. 计算平均开仓价格 (Entry Price)
@@ -74,7 +86,22 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
 
   // 2. 格式化保证金
   const marginUSDC = formatUnits(position.openMargin, 6);
-  const size = Number(position.openSize);
+  // Human-readable size (raw on-chain value is 1e6-scaled)
+  const size = Number(formatUnits(position.openSize, PX_DECIMALS));
+
+  // 3a. 格式化 size 字段为人类可读 (6 decimals → display)
+  const fmtSz = (n: bigint) => Number(formatUnits(n, PX_DECIMALS)).toFixed(2);
+
+  // Size 显示格式:
+  //   pendingOpen  (1): openSize / pendingSize  (已成交 / 剩余委托)
+  //   pendingClose (3): closeSize / openSize    (平仓量 / 持仓量)
+  //   其余状态        : openSize
+  const sizeDisplay =
+    position.status === 1
+      ? `${fmtSz(position.openSize)} / ${fmtSz(position.pendingSize)}`
+      : position.status === 3
+      ? `${fmtSz(position.closeSize)} / ${fmtSz(position.openSize)}`
+      : fmtSz(position.openSize);
 
   // 3. 计算预估盈亏 (Estimated PnL)
   const getSimulatedPnL = (targetPriceStr: string) => {
@@ -169,8 +196,8 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
           </div>
 
           <div className="flex gap-2">
-            {/* Cancel: pendingOpen */}
-            {position.status === 1 && (
+            {/* Cancel: pendingOpen or pendingClose */}
+            {(position.status === 1 || position.status === 3) && (
               <button
                 onClick={handleCancel}
                 disabled={isConfirming}
@@ -206,12 +233,22 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-bedrock-900/50 p-4 rounded-xl border border-white/5">
           <div>
-            <div className="text-xs text-gray-500 mb-1">{t.positions.size}</div>
-            <div className="font-mono font-semibold text-white">{size}</div>
+            <div className="text-xs text-gray-500 mb-1">
+              {t.positions.size}
+              {position.status === 1 && <span className="ml-1 text-gray-600">(filled/pending)</span>}
+              {position.status === 3 && <span className="ml-1 text-gray-600">(closing/open)</span>}
+            </div>
+            <div className="font-mono font-semibold text-white">{sizeDisplay}</div>
           </div>
           <div>
-            <div className="text-xs text-gray-500 mb-1">{t.positions.entry}</div>
-            <div className="font-mono font-semibold text-white">${entryPrice.toFixed(2)}</div>
+            <div className="text-xs text-gray-500 mb-1">
+              {position.status === 1 ? 'Order Price' : t.positions.entry}
+            </div>
+            <div className="font-mono font-semibold text-white">
+              {position.status === 1
+                ? (orderBookPrice !== null ? `$${orderBookPrice.toFixed(2)}` : '—')
+                : `$${entryPrice.toFixed(2)}`}
+            </div>
           </div>
           <div>
             <div className="text-xs text-gray-500 mb-1">{t.positions.margin}</div>
@@ -230,29 +267,40 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
 
       {/* Close Modal */}
       {showCloseModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="card max-w-md w-full border border-gray-700 bg-gray-800 shadow-2xl scale-100">
-            <div className="flex items-center justify-between mb-6 border-b border-gray-700 pb-4">
-              <h3 className="text-xl font-bold flex items-center gap-2">
-                <ShieldAlert className="text-red-500" size={24} />
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-bedrock-800 border border-white/10 rounded-2xl shadow-2xl w-full max-w-md">
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-white/10">
+              <h3 className="text-base font-semibold flex items-center gap-2 text-white">
+                <ShieldAlert className="text-red-400" size={18} />
                 {t.positions.closeModalTitle}
               </h3>
               <button
                 onClick={() => setShowCloseModal(false)}
-                className="text-gray-400 hover:text-white p-1 hover:bg-gray-700 rounded transition-colors"
+                className="text-gray-500 hover:text-white p-1 hover:bg-white/10 rounded-lg transition-colors"
               >
-                <X size={24} />
+                <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-6">
+            <div className="px-6 py-5 space-y-5">
+              {/* Position summary */}
+              <div className="flex justify-between text-sm text-gray-400">
+                <span>{t.positions.entry}: <span className="text-white font-mono">${entryPrice.toFixed(2)}</span></span>
+                <span>{t.positions.size}: <span className="text-white font-mono">{fmtSz(position.openSize)}</span></span>
+              </div>
+
+              {/* Price input */}
               <div>
-                <label className="label text-gray-300">{t.positions.closePrice} (USD)</label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <label className="block text-xs font-medium text-gray-400 mb-2">
+                  {t.positions.closePrice} (USD)
+                </label>
+                <div className="flex items-center bg-bedrock-900 border border-white/10 rounded-xl focus-within:border-accent-purple/60 transition-colors">
+                  <span className="pl-4 text-gray-500 select-none">$</span>
                   <input
+                    autoFocus
                     type="number"
-                    className="input pl-7"
+                    className="flex-1 bg-transparent text-white font-mono px-2 py-3 outline-none placeholder-gray-600 text-sm"
                     value={closePrice}
                     onChange={(e) => setClosePrice(e.target.value)}
                     placeholder={entryPrice.toFixed(2)}
@@ -260,34 +308,49 @@ export function PositionCard({ tokenId, position }: PositionCardProps) {
                     min="0.01"
                   />
                 </div>
-                <p className="text-xs text-gray-500 mt-2 flex justify-between">
-                  <span>{t.positions.entry}: ${entryPrice.toFixed(2)}</span>
-                  <span>{t.positions.size}: {size} units</span>
-                </p>
-              </div>
-
-              <div className="bg-gray-900/50 rounded-lg p-4 space-y-2 text-sm border border-gray-700">
-                {closePrice && (
-                  <>
-                    <div className="flex justify-between items-center">
-                      <span className="text-gray-400">{t.positions.pnl}:</span>
-                      <span className={`font-mono text-lg font-bold ${getSimulatedPnL(closePrice) >= 0 ? 'text-green-500' : 'text-red-500'
-                        }`}>
-                        {getSimulatedPnL(closePrice) >= 0 ? '+' : ''}
-                        ${getSimulatedPnL(closePrice).toFixed(2)}
-                      </span>
-                    </div>
-                  </>
-                )}
-                <div className="text-xs text-gray-500 pt-2 border-t border-gray-700 mt-2">
-                  注意：如果不完全成交，剩余部分将保留在持仓中。
+                {/* Quick-select buttons */}
+                <div className="flex gap-2 mt-2">
+                  {[-2, -1, 1, 2].map(pct => {
+                    const p = (entryPrice * (1 + pct / 100)).toFixed(2);
+                    return (
+                      <button
+                        key={pct}
+                        onClick={() => setClosePrice(p)}
+                        className={`flex-1 text-xs py-1.5 rounded-lg border transition-colors font-mono ${
+                          pct < 0
+                            ? 'border-red-500/30 text-red-400 hover:bg-red-500/10'
+                            : 'border-green-500/30 text-green-400 hover:bg-green-500/10'
+                        }`}
+                      >
+                        {pct > 0 ? '+' : ''}{pct}%
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
+              {/* PnL preview */}
+              <div className="bg-bedrock-900/60 rounded-xl border border-white/5 px-4 py-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-gray-500">{t.positions.pnl}</span>
+                  {closePrice ? (
+                    <span className={`font-mono font-bold text-base ${
+                      getSimulatedPnL(closePrice) >= 0 ? 'text-green-400' : 'text-red-400'
+                    }`}>
+                      {getSimulatedPnL(closePrice) >= 0 ? '+' : ''}
+                      ${getSimulatedPnL(closePrice).toFixed(2)}
+                    </span>
+                  ) : (
+                    <span className="text-gray-600 text-sm">—</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Confirm button */}
               <button
                 onClick={handleClose}
                 disabled={!closePrice || isConfirming}
-                className="w-full btn-primary bg-red-600 hover:bg-red-700 border-none py-3 text-lg"
+                className="w-full py-3 rounded-xl font-semibold text-sm transition-all bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed text-white"
               >
                 {isConfirming ? t.trading.confirming : t.positions.confirmClose}
               </button>
