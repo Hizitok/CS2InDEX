@@ -115,13 +115,18 @@ Pool 持有对 Vault、Oracle、PositionNFT 和 LiquidationEngine 的引用。
 
 ```solidity
 struct Position {
-    address owner;
-    bool isLong;
-    uint256 openPrice;    // 开仓价格（6 位小数）
-    uint256 fillSize;     // 仓位大小（以 USDC 计价）
-    uint256 margin;       // 保证金（USDC）
-    uint256 fundingIdx;   // 开仓时的 fundingIdx 快照
-    PositionState state;  // 仓位状态
+    bool isShort;           // true = 空头，false = 多头
+    posStatus status;       // Pending / Open / Closing / Liquidating / Closed
+    uint256 openMargin;     // 开仓保证金（USDC，6 位精度）
+
+    // uint128 存储节省 gas：每对字段共享 1 个 storage slot
+    uint128 pendingSize;    // 等待撮合的挂单量
+    uint128 openSize;       // 已成交的仓位大小
+    uint128 closeSize;      // 已平仓的仓位大小
+    uint128 openAmount;     // 累计开仓 USDC 金额（price × size）
+    uint128 closeAmount;    // 累计平仓 USDC 金额
+    uint128 openFundingIdx; // 开仓时的全局 fundingIdx 快照
+    uint128 closeFundingIdx;// 平仓时的全局 fundingIdx 快照
 }
 ```
 
@@ -538,7 +543,7 @@ VTWAP 权重 `min(Δt, 3600) × size` 意味着：
 
 | 风险 | 当前状态 | 改进计划 |
 |------|---------|---------|
-| 清算循环 Gas 超限 | 无 maxIterations 限制 | 增加 maxIterations 参数（Q1 2026） |
+| 清算循环 Gas 超限 | 无 maxIterations 限制 | 增加 maxIterations 参数（Q2 2026） |
 | 单一预言机来源 | 单一 reporter | 多数据源聚合（Q3 2026） |
 | 预言机中心化 | 单一 reporter 密钥 | 去中心化 reporter 网络（Q3 2026） |
 | 保险基金缺失 | 未实现 | 手续费一部分注入保险基金（Q2 2026） |
@@ -550,15 +555,15 @@ VTWAP 权重 `min(Δt, 3600) × size` 意味着：
 
 ### Q1 2026 — 测试网与外部审计
 
-- [ ] 部署至 Arbitrum Sepolia 测试网
-- [ ] 完成单元测试覆盖率 > 95%
+- [x] 部署至 Unichain Sepolia 测试网（ChainId 1301）
+- [x] 单元测试 122 个用例通过
 - [ ] 委托两家独立安全公司进行智能合约审计
 - [ ] 修复审计发现的所有 Critical 和 High 级别漏洞
 - [ ] 公开 Bug Bounty 计划启动
 
-### Q2 2026 — Arbitrum 主网上线与代币发行
+### Q2 2026 — Unichain 主网上线与代币发行
 
-- [ ] 主网部署（Arbitrum One）
+- [ ] 主网部署（Unichain）
 - [ ] 初始流动性挖矿计划
 - [ ] 协议治理代币（INDEX）TGE
 - [ ] 基础保险基金建立（初始注入 50 万 USDC）

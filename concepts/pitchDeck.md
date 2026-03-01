@@ -314,7 +314,7 @@ _注：假设平均手续费 0.4%（Maker/Taker 混合）_
 - [x] 内部代码审计通过（6 个 CRITICAL/HIGH Bug 修复）
 - [x] 前端基本可用（Next.js + RainbowKit）
 - [x] Oracle 服务运行（SkinFlow + EsportFire 数据源）
-- [ ] 测试网部署（Unichain Sepolia）
+- [x] 测试网部署（Unichain Sepolia）
 - [ ] 外部安全审计启动（Code4rena）
 
 **2026 Q2 — 主网上线**

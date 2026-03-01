@@ -1,7 +1,7 @@
 # CS2InDEX — 代币经济学设计
 
 **代币名称：$CSIDX**
-**网络：Arbitrum One (ERC-20)**
+**网络：Unichain (ERC-20)**
 **总供应量：100,000,000（1 亿枚，固定上限）**
 
 ---
@@ -125,13 +125,13 @@ _折扣在每笔订单结算时实时应用，无需手动操作_
 
 ### 4.1 TGE 方案
 
-- **TGE 方式**：Balancer LBP（流动性引导池）或 Camelot IDO（Arbitrum 生态）
+- **TGE 方式**：Balancer LBP（流动性引导池）或 Unichain 生态 IDO
 - **TGE 价格**：待定（取决于私募估值和市场条件）
 - **初始流通量**：~15%（10% 流动性 + 约 5% 社区空投）
 
 ### 4.2 DEX 初始流动性
 
-- 在 Uniswap V3（Arbitrum）部署 $CSIDX/USDC 集中流动性池
+- 在 Uniswap V3（Unichain）部署 $CSIDX/USDC 集中流动性池
 - 初始流动性：10,000,000 $CSIDX + 对应 USDC（按 TGE 定价）
 - 价格区间：±50%（防止单点价格耗尽）
 - 流动性锁定：6 个月（Unicrypt 或 Team Finance 锁仓）

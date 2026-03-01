@@ -180,35 +180,11 @@ EOF
     cat "$DEPLOYED_JSON"
   fi
 
-  # ── 自动更新前端配置 ──────────────────────────────────────────────────────
-  FRONTEND_CONFIG="$ROOT_DIR/frontend/src/config/contracts.ts"
-  if [[ -f "$FRONTEND_CONFIG" && command -v python3 >/dev/null 2>&1 ]]; then
-    info "更新前端合约配置..."
-    python3 - "$DEPLOYED_JSON" "$FRONTEND_CONFIG" "$CHAIN_ID" <<'PYEOF'
-import json, sys, re
-
-data    = json.load(open(sys.argv[1]))
-cfg     = open(sys.argv[2]).read()
-chainId = sys.argv[3]
-
-# 替换常量地址（POOL 取第一个 pool，即 CS2-Global-Index）
-first_pool = data.get("pools", [{}])[0].get("pool", "")
-for key, val in [("FACTORY", data.get("factory","")),
-                 ("VAULT",   data.get("vault","")),
-                 ("USDC",    data.get("usdc","")),
-                 ("ROUTER",  data.get("router","")),
-                 ("NFT",     data.get("nft","")),
-                 ("POOL",    first_pool)]:
-    cfg = re.sub(
-        rf'({key}\s*:\s*[\'"])0x[0-9a-fA-F]+([\'"])',
-        lambda m, v=val: f"{m.group(1)}{v}{m.group(2)}",
-        cfg
-    )
-
-open(sys.argv[2], "w").write(cfg)
-print(f"  前端配置已更新: {sys.argv[2]}")
-PYEOF
-    success "前端配置更新完成"
+  # ── 自动同步合约地址到前端 + 做市商 ─────────────────────────────────────────
+  SYNC_SCRIPT="$ROOT_DIR/scripts/sync-addresses.sh"
+  if [[ -f "$SYNC_SCRIPT" ]]; then
+    info "同步合约地址到前端和做市商..."
+    bash "$SYNC_SCRIPT" "$CHAIN_ID" || warn "地址同步出错（不影响部署结果）"
   fi
 else
   warn "未找到部署结果 JSON（$DEPLOYED_JSON）"
@@ -218,14 +194,27 @@ echo ""
 echo "============================================="
 echo "  后续操作"
 echo "============================================="
-echo "  1. 启动 Oracle 服务："
+echo "  1. 填写做市商私钥（首次部署需要）："
+echo "     编辑 marketmaker/.env，填写 PRIVATE_KEY"
+echo ""
+echo "  2. 一键启动前端 + 做市商："
+echo "     bash scripts/start-dev.sh"
+echo ""
+echo "  3. 或分别启动："
+echo "     bash scripts/start-dev.sh --mm-only   # 仅做市商"
+echo "     bash scripts/start-dev.sh --no-mm     # 仅前端"
+echo ""
+echo "  4. 重新部署后单独同步地址："
+echo "     bash scripts/sync-addresses.sh"
+echo ""
+echo "  5. 启动 Oracle 服务："
 echo "     cd oracle-service && npm start"
 echo ""
-echo "  2. 验证合约（如自动验证失败）："
+echo "  6. 验证合约（如自动验证失败）："
 echo "     见 deploy/README.md #验证合约"
 echo ""
 if [[ "$NETWORK" == "mainnet" ]]; then
-  echo "  3. [重要] 将 Factory 所有权转移给多签钱包："
+  echo "  7. [重要] 将 Factory 所有权转移给多签钱包："
   echo "     cast send <FACTORY> 'transferOwnership(address)' <MULTISIG>"
   echo ""
 fi

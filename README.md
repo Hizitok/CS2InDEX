@@ -116,34 +116,49 @@ CS2InDEX/
 │
 ├── test/                     # Foundry tests
 │   ├── Pool.t.sol           # Pool unit tests
-│   ├── Integration.t.sol    # Integration tests
+│   ├── Integration.t.sol    # End-to-end integration tests
+│   ├── GasBenchmark.t.sol   # Gas benchmarking
 │   ├── OrderStatisticsTree.t.sol  # OS Tree tests
-│   └── mocks/               # Mock contracts
+│   └── mocks/               # Mock contracts for testing
 │
-├── script/                   # Deployment scripts
-│   ├── Deploy.s.sol         # Testnet deployment (with mocks)
-│   └── DeployMainnet.s.sol  # Mainnet deployment (real USDC)
+├── deploy/                   # Deployment scripts & artifacts
+│   ├── Deploy.s.sol         # Forge deployment script
+│   ├── deploy.sh            # One-click deploy + address sync
+│   ├── deployed.{chainId}.json  # Deployed addresses (auto-generated)
+│   └── README.md            # Deployment guide
+│
+├── scripts/                  # Developer utility scripts
+│   ├── sync-addresses.sh    # Sync deployed addresses → frontend + marketmaker
+│   └── start-dev.sh         # Start frontend + market maker together
 │
 ├── frontend/                 # Next.js web application
 │   ├── src/
-│   │   ├── app/             # Next.js App Router
-│   │   ├── components/      # React components
+│   │   ├── app/             # Next.js App Router pages
+│   │   ├── components/      # React UI components
 │   │   └── config/          # Contract ABIs & addresses
-│   ├── package.json
-│   └── README.md
+│   └── package.json
 │
 ├── oracle-service/           # Price feed backend service
 │   ├── src/
 │   │   ├── index.ts         # Main service entry
-│   │   ├── oracle-updater.ts     # On-chain updates
-│   │   ├── price-aggregator.ts   # Fetch external prices
-│   │   └── utils/           # Logger, etc.
+│   │   ├── oracle-updater.ts     # On-chain price updates
+│   │   └── price-aggregator.ts   # Fetch from SkinFlow / EsportFire
 │   ├── Dockerfile
-│   ├── docker-compose.yml
-│   └── README.md
+│   └── docker-compose.yml
 │
-├── deploy/                   # Deployment documentation
-│   └── README.md            # Complete deployment guide
+├── marketmaker/              # Grid market maker bot
+│   ├── src/
+│   │   ├── bot.ts           # Grid + Martingale strategy
+│   │   ├── config.ts        # Bot configuration
+│   │   └── contracts.ts     # Contract ABIs
+│   └── package.json
+│
+├── concepts/                 # Background docs & investor materials
+│   ├── README.md            # Project concept overview
+│   ├── whitepaper.md
+│   ├── pitchDeck.md
+│   ├── tokenomics.md
+│   └── roadshow.md
 │
 ├── foundry.toml             # Foundry configuration
 ├── .env.example             # Environment template
@@ -203,14 +218,11 @@ forge test -vvv
 ```bash
 # Configure environment
 cp .env.example .env
-# Edit .env with your values
+# Edit .env: set PRIVATE_KEY and SEPOLIA_RPC_URL
 
-# Deploy to Sepolia
-forge script script/Deploy.s.sol \
-  --rpc-url sepolia \
-  --broadcast \
-  --verify \
-  -vvvv
+# Deploy to Unichain Sepolia (chainId 1301)
+# Automatically syncs addresses to frontend and marketmaker after deploy
+bash deploy/deploy.sh sepolia
 ```
 
 See [deploy/README.md](deploy/README.md) for detailed deployment instructions.
@@ -219,33 +231,25 @@ See [deploy/README.md](deploy/README.md) for detailed deployment instructions.
 
 ```bash
 cd oracle-service
-
-# Configure environment
 cp .env.example .env
-# Edit .env with deployed oracle addresses
-
-# Start service
-npm run dev
+# Edit .env with deployed oracle address and API keys
+npm start
 ```
 
-See [oracle-service/README.md](oracle-service/README.md) for detailed oracle setup.
-
-### 6. Run Frontend
+### 6. Start Frontend + Market Maker
 
 ```bash
-cd frontend
+# Edit marketmaker/.env: set PRIVATE_KEY (auto-created by deploy.sh)
 
-# Configure environment
-cp .env.example .env.local
-# Edit .env.local with WalletConnect Project ID
+# Start both together (market maker in background, frontend in foreground)
+bash scripts/start-dev.sh
 
-# Start development server
-npm run dev
+# Or separately:
+bash scripts/start-dev.sh --no-mm     # frontend only
+bash scripts/start-dev.sh --mm-only   # market maker only
 ```
 
 Visit http://localhost:3000
-
-See [frontend/README.md](frontend/README.md) for detailed frontend guide.
 
 ## Smart Contracts
 
@@ -414,9 +418,10 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 - [Deployment Guide](deploy/README.md) - Complete deployment instructions
 - [Testing Guide](TESTING.md) - How to run and write tests
-- [Frontend Guide](frontend/README.md) - Frontend setup and usage
+- [Frontend Guide](frontend/FRONTEND_README.md) - Frontend setup and usage
+- [Market Maker Guide](marketmaker/before_start.md) - Market maker setup
 - [Oracle Service Guide](oracle-service/README.md) - Oracle service setup
-- [Frontend Deployment](frontend/DEPLOYMENT.md) - Frontend deployment guide
+- [Concepts & Whitepaper](concepts/README.md) - Project background and design docs
 
 ## Resources
 

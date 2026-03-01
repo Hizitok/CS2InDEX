@@ -114,6 +114,8 @@ export const translations = {
             approving: 'Approving...',
             depositing: 'Depositing...',
             withdrawing: 'Withdrawing...',
+            faucet: 'Claim 1000 USDC',
+            claiming: 'Claiming...',
         },
         positions: {
             title: 'Your Positions',
@@ -279,6 +281,8 @@ export const translations = {
             approving: '授权中...',
             depositing: '充值中...',
             withdrawing: '提取中...',
+            faucet: '领取 1000 USDC',
+            claiming: '领取中...',
         },
         positions: {
             title: '我的持仓',

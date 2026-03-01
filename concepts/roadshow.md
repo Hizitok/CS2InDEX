@@ -11,15 +11,15 @@
 | 智能合约 | 完成，内部审计通过 | ⚠️ 需外部审计 |
 | 前端 | 基本可用，本地运行 | ⚠️ 需测试网部署 |
 | Oracle 服务 | 可运行，单源 | ⚠️ 需多源聚合 |
-| 测试覆盖 | 70 个用例通过 | ✅ 够用 |
-| 白皮书 | 无 | ❌ 必须有 |
-| Pitch Deck | 无 | ❌ 必须有 |
-| 代币经济学 | 无设计 | ❌ 必须有 |
-| 测试网演示 | 未部署 | ❌ 必须有 |
+| 测试覆盖 | 122 个用例通过 | ✅ 够用 |
+| 白皮书 | concepts/whitepaper.md | ✅ 完成 |
+| Pitch Deck | concepts/pitchDeck.md | ✅ 完成 |
+| 代币经济学 | concepts/tokenomics.md | ✅ 完成 |
+| 测试网演示 | 已部署 Unichain Sepolia（ChainId 1301） | ✅ 可演示 |
 | 外部审计 | 未进行 | ❌ 必须有 |
 | 市场分析 | 无文档 | ❌ 必须有 |
 | 团队介绍 | 无 | ❌ 必须有 |
-| 竞品分析 | 无 | ❌ 必须有 |
+| 竞品分析 | pitchDeck.md Slide 8 | ✅ 初版 |
 
 ---
 
@@ -37,11 +37,11 @@
 
 ### 2. 测试网部署
 
-- [ ] 选择测试网（推荐 **Unichain Sepolia**，gas 便宜且接近主网）
-- [ ] 部署完整合约栈（Factory、Vault、Pool、Oracle、PositionNFT、LiquidationEngine）
-- [ ] 部署 Mock USDC（ERC20，含公开 faucet）
-- [ ] 配置 Oracle 服务对接测试网合约地址
-- [ ] 配置前端指向测试网合约
+- [x] 选择测试网（**Unichain Sepolia**，ChainId 1301）
+- [x] 部署完整合约栈（Factory、Vault、Pool、Oracle、PositionNFT、LiquidationEngine）
+- [x] 部署 Mock USDC（ERC20，含公开 mint 函数）
+- [x] 配置 Oracle 服务对接测试网合约地址
+- [x] 配置前端指向测试网合约（`bash scripts/sync-addresses.sh` 自动同步）
 - [ ] 公开测试网地址和 faucet 链接
 
 ### 3. Pitch Deck（10-15 页 PPT）
@@ -76,13 +76,13 @@
 
 ## P1 — 路演质量提升（有则加分）
 
-### 5. 白皮书（技术 + 经济学）
+### 5. 白皮书（技术 + 经济学）✅
 
-- [ ] 协议机制：资金费率公式推导、清算模型、VTWAP 计算
+- [x] 协议机制：资金费率公式推导、清算模型、VTWAP 计算
+- [x] Oracle 安全性：VTWAP 防操纵设计（min(Δt, cap) × size 权重）
+- [x] 经济攻击分析：自成交操纵资金费率的成本模型
 - [ ] 市场指数构成：选哪些皮肤，权重如何计算，再平衡规则
 - [ ] 风险模型：极端行情下的协议偿付能力分析
-- [ ] Oracle 安全性：VTWAP 防操纵设计（min(Δt, cap) × size 权重）
-- [ ] 经济攻击分析：自成交操纵资金费率的成本模型
 
 ### 6. 市场分析文档
 
@@ -116,10 +116,11 @@
 
 链上订单簿冷启动必须解决流动性问题：
 
+- [x] 实现网格做市算法（marketmaker/ 目录，Martingale 策略）
+- [x] 做市商自动资金管理（自动 mint USDC、approve、deposit）
+- [x] 测试网阶段先跑内部做市，验证 VTWAP 和资金费率计算
 - [ ] 设计做市商激励（手续费减免 / 代币奖励）
-- [ ] 实现简单做市算法（已在 README 提及但未实现）
 - [ ] 计划启动时投入多少 USDC 作为初始流动性
-- [ ] 测试网阶段先跑内部做市，验证 VTWAP 和资金费率计算
 
 ---
 
@@ -143,11 +144,11 @@
 
 ### 11. 技术健壮性（主网前修复）
 
+- [x] Router 完整实现并测试 `depositAndOpenPosition`
+- [x] `emergencyCloseAllPositions` 完整实现
 - [ ] `liquidate()` 添加 `maxIterations` 参数
 - [ ] `getPositionsByOwner` 改为链下索引 + `TheGraph` 子图
-- [ ] Router 完整实现并测试 `depositAndOpenPosition`
 - [ ] Oracle 多源聚合（至少 3 个数据源，取中位数）
-- [ ] `emergencyCloseAllPositions` 完整实现
 - [ ] L2 部署评估（Unichain 主网更低 gas）
 
 ---
@@ -170,15 +171,15 @@
 
 ## 优先级总结
 
-| 优先级 | 任务 | 预计工期 |
-|--------|------|---------|
-| **P0-阻断** | 修复 Router + emergencyClose | 1 天 |
-| **P0-阻断** | 测试网部署 + faucet | 2 天 |
-| **P0-阻断** | Pitch Deck 制作 | 3-5 天 |
-| **P0-阻断** | 代币经济学设计 | 2-3 天 |
-| **P1-加分** | 白皮书 | 5-7 天 |
-| **P1-加分** | 外部审计启动 | 2-4 周（等待） |
-| **P1-加分** | 做市商方案 + 脚本 | 3-5 天 |
-| **P1-加分** | 市场分析文档 | 2-3 天 |
-| **P2-主网** | 法律架构咨询 | 2-4 周 |
-| **P2-主网** | 社区建设 | 持续进行 |
+| 优先级 | 任务 | 状态 |
+|--------|------|------|
+| **P0-阻断** | 修复 Router + emergencyClose | ✅ 完成 |
+| **P0-阻断** | 测试网部署（Unichain Sepolia） | ✅ 完成 |
+| **P0-阻断** | Pitch Deck 制作 | ✅ 完成 |
+| **P0-阻断** | 代币经济学设计 | ✅ 完成 |
+| **P1-加分** | 白皮书 | ✅ 完成 |
+| **P1-加分** | 外部审计启动 | ❌ 待启动 |
+| **P1-加分** | 做市商方案 + 脚本 | ✅ 完成 |
+| **P1-加分** | 市场分析文档 | ❌ 待完成 |
+| **P2-主网** | 法律架构咨询 | ❌ 待启动 |
+| **P2-主网** | 社区建设 | ❌ 待启动 |

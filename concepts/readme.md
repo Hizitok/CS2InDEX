@@ -1,17 +1,24 @@
-
-
 # An Exchange Platform for Counter Strike Items Index
 
 Consider a traditional Crypto Exchange
 ![](image.png)
 
+Similar to Crypto Exchange, our project aims to provide an on-chain platform for players to do index trading for item hedging.
 
-Similar to Crypto Exchange,  Our project is aim to provide a onchain platform for players to do index trading for item hedging.
+**Index sources:**
 
-Index source:
-
-https://skinflow.gg/csgo-stash/graph/overview
+- https://skinflow.gg/csgo-stash/graph/overview
 
 ![alt text](image-1.png)
 
-https://esportfire.com/indexes
+- https://esportfire.com/indexes
+
+---
+
+## Documents
+
+- [Whitepaper](whitepaper.md)
+- [Pitch Deck](pitchDeck.md)
+- [Tokenomics](tokenomics.md)
+- [Roadshow](roadshow.md)
+- [Order Statistics Tree Implementation](orderStatisticsTree.md)

@@ -13,7 +13,7 @@ import { useAccount, useReadContract, useWriteContract, useWaitForTransactionRec
 import { formatUnits, parseUnits } from 'viem';
 import { VAULT_ABI, ERC20_ABI, CONTRACTS } from '@/config/contracts';
 import toast from 'react-hot-toast';
-import { Wallet, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import { Wallet, ArrowDownToLine, ArrowUpFromLine, Droplets } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
 
@@ -70,16 +70,32 @@ export function VaultBalance() {
   const { writeContract: approve, data: approveHash, error: approveError } = useWriteContract();
   const { writeContract: deposit, data: depositHash, error: depositError } = useWriteContract();
   const { writeContract: withdraw, data: withdrawHash, error: withdrawError } = useWriteContract();
+  const { writeContract: mint, data: mintHash, error: mintError } = useWriteContract();
 
   // 交易状态监听
   const { isLoading: isApproving } = useWaitForTransactionReceipt({ hash: approveHash });
   const { isLoading: isDepositing } = useWaitForTransactionReceipt({ hash: depositHash });
   const { isLoading: isWithdrawing } = useWaitForTransactionReceipt({ hash: withdrawHash });
+  const { isLoading: isMinting } = useWaitForTransactionReceipt({ hash: mintHash });
 
   // 计算是否需要授权
   const needsApproval = amount && allowance !== undefined
     ? parseUnits(amount, 6) > (allowance as bigint)
     : false;
+
+  /**
+   * 领取测试代币 (faucet)
+   */
+  const handleMint = () => {
+    if (!address) return;
+    mint({
+      address: CONTRACTS.USDC,
+      abi: ERC20_ABI,
+      functionName: 'mint',
+      args: [address, parseUnits('1000', 6)],
+    });
+    toast.loading('正在领取测试 USDC...');
+  };
 
   /**
    * 处理 USDC 授权
@@ -162,8 +178,18 @@ export function VaultBalance() {
           </div>
         </div>
 
-        <div className="text-xs text-right text-gray-500">
-          {t.trading.balance}: <span className="text-gray-300">{formattedUsdcBalance} USDC</span>
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-gray-500">
+            {t.trading.balance}: <span className="text-gray-300">{formattedUsdcBalance} USDC</span>
+          </div>
+          <button
+            onClick={handleMint}
+            disabled={isMinting}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-cyan-900/40 hover:bg-cyan-800/50 border border-cyan-700/50 text-cyan-400 hover:text-cyan-300 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <Droplets size={12} />
+            {isMinting ? t.vault.claiming : t.vault.faucet}
+          </button>
         </div>
       </div>
 
@@ -261,9 +287,9 @@ export function VaultBalance() {
       </div>
 
       {/* 错误提示 */}
-      {(approveError || depositError || withdrawError) && (
+      {(approveError || depositError || withdrawError || mintError) && (
         <div className="mt-4 p-3 bg-red-900/20 border border-red-800/50 rounded-lg text-xs text-red-300 break-words">
-          {(approveError || depositError || withdrawError)?.message}
+          {(approveError || depositError || withdrawError || mintError)?.message}
         </div>
       )}
     </div>

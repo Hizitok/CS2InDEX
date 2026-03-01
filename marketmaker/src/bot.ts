@@ -102,16 +102,10 @@ export class MarketMaker {
         // 2. Close any open positions not tracked in slots (e.g. orphaned from prev run)
         await this.closeOrphanPositions();
 
-        // 3. Refresh grid if price has moved more than 1.5 steps from center
-        const needsRefresh = await this.gridNeedsRefresh(mid);
-        if (needsRefresh) {
-            log(`Price moved to ${mid}, refreshing grid…`);
-            await this.cancelStaleOrders(mid);
-            await this.refreshGrid(mid);
-        } else {
-            // Only fill in any missing open slots
-            await this.fillMissingSlots(mid);
-        }
+        // 3. Fill in missing grid slots around current mid.
+        //    Existing pending orders are NEVER cancelled due to price movement —
+        //    they stay in the book and fill naturally.
+        await this.fillMissingSlots(mid);
     }
 
     // ── Grid management ─────────────────────────────────────────────────────────
@@ -444,24 +438,84 @@ export class MarketMaker {
     }
 
     private async checkBalanceAndApprove() {
-        const balance = await this.pub.readContract({
+        // Minimum Vault balance needed for this grid config (with 2× safety buffer)
+        const minRequired = toChain(
+            CONFIG.baseMargin * CONFIG.gridLevels * 2 *
+            CONFIG.martingaleMult ** CONFIG.martingaleMaxLevel * 2
+        );
+
+        // ── 1. Check current Vault balance ──────────────────────────────────────
+        const vaultBal = await this.pub.readContract({
             address: CONFIG.vaultAddress,
             abi: VAULT_ABI,
             functionName: 'balanceOf',
             args: [this.account.address],
         }) as bigint;
 
-        const minRequired = toChain(
-            CONFIG.baseMargin * CONFIG.gridLevels * 2 *
-            CONFIG.martingaleMult ** CONFIG.martingaleMaxLevel
-        );
+        log(`Vault balance: ${fromChain(vaultBal)} USDC (need ${fromChain(minRequired)})`);
 
-        if (balance < minRequired) {
-            warn(`Vault balance (${fromChain(balance)} USDC) below recommended minimum.`);
-            warn(`Deposit more funds or reduce grid parameters.`);
-        } else {
-            log(`Vault balance: ${fromChain(balance)} USDC`);
+        if (vaultBal >= minRequired) return; // already funded, done
+
+        const needed = minRequired - vaultBal;
+        log(`Vault underfunded by ${fromChain(needed)} USDC — auto-funding…`);
+
+        // ── 2. Check USDC wallet balance, mint if needed ────────────────────────
+        const walletBal = await this.pub.readContract({
+            address: CONFIG.tokenAddress,
+            abi: ERC20_ABI,
+            functionName: 'balanceOf',
+            args: [this.account.address],
+        }) as bigint;
+
+        if (walletBal < needed) {
+            const mintAmt = needed - walletBal;
+            log(`Minting ${fromChain(mintAmt)} MockUSDC…`);
+            const { request: mintReq } = await this.pub.simulateContract({
+                address: CONFIG.tokenAddress,
+                abi: ERC20_ABI,
+                functionName: 'mint',
+                args: [this.account.address, mintAmt],
+                account: this.account,
+            });
+            const mintHash = await this.wallet.writeContract(mintReq as any);
+            await this.pub.waitForTransactionReceipt({ hash: mintHash });
+            log(`  → minted, tx: ${mintHash}`);
         }
+
+        // ── 3. Approve Vault if allowance is insufficient ───────────────────────
+        const allowance = await this.pub.readContract({
+            address: CONFIG.tokenAddress,
+            abi: ERC20_ABI,
+            functionName: 'allowance',
+            args: [this.account.address, CONFIG.vaultAddress],
+        }) as bigint;
+
+        if (allowance < needed) {
+            log(`Approving Vault for max USDC…`);
+            const { request: approveReq } = await this.pub.simulateContract({
+                address: CONFIG.tokenAddress,
+                abi: ERC20_ABI,
+                functionName: 'approve',
+                args: [CONFIG.vaultAddress, BigInt(2) ** BigInt(256) - BigInt(1)],
+                account: this.account,
+            });
+            const approveHash = await this.wallet.writeContract(approveReq as any);
+            await this.pub.waitForTransactionReceipt({ hash: approveHash });
+            log(`  → approved, tx: ${approveHash}`);
+        }
+
+        // ── 4. Deposit into Vault ───────────────────────────────────────────────
+        log(`Depositing ${fromChain(needed)} USDC into Vault…`);
+        const { request: depReq } = await this.pub.simulateContract({
+            address: CONFIG.vaultAddress,
+            abi: VAULT_ABI,
+            functionName: 'deposit',
+            args: [needed],
+            account: this.account,
+        });
+        const depHash = await this.wallet.writeContract(depReq as any);
+        await this.pub.waitForTransactionReceipt({ hash: depHash });
+        log(`  → deposited, tx: ${depHash}`);
     }
 }
 

@@ -42,32 +42,31 @@ forge fmt
 
 ## Test Examples
 
-### Run Vault Tests
+### Run Pool Unit Tests
 ```bash
-$ forge test --match-path test/Vault.t.sol
+$ forge test --match-path test/Pool.t.sol -vv
 
-Running 20 tests for test/Vault.t.sol:VaultTest
-[PASS] test_Deposit() (gas: 124561)
-[PASS] test_Withdraw() (gas: 152341)
-[PASS] test_LockBalance() (gas: 167890)
+Running tests for test/Pool.t.sol:PoolTest
+[PASS] testNewOrder_LimitBuy() (gas: ...)
+[PASS] testNewOrder_MarketMatch() (gas: ...)
+[PASS] testCancelOrder_PendingOpen() (gas: ...)
 ...
-Test result: ok. 20 passed; 0 failed; finished in 2.45s
 ```
 
 ### Run Integration Tests
 ```bash
 $ forge test --match-path test/Integration.t.sol -vv
 
-Running 9 tests for test/Integration.t.sol:IntegrationTest
-[PASS] test_FullTradingCycle_Profit() (gas: 876543)
-  Logs:
-    Alice initial balance: 10000000000
-    Alice final balance: 10096754321
-    Profit: 96754321
-
-[PASS] test_FullLiquidationFlow() (gas: 654321)
+Running tests for test/Integration.t.sol:IntegrationTest
+[PASS] test_FullTradingCycle() (gas: ...)
+[PASS] test_LiquidationFlow() (gas: ...)
+[PASS] test_FundingRate() (gas: ...)
 ...
-Test result: ok. 9 passed; 0 failed; finished in 3.12s
+```
+
+### Run Gas Benchmark
+```bash
+$ forge test --match-path test/GasBenchmark.t.sol -vv
 ```
 
 ## Common Commands
@@ -122,25 +121,46 @@ forge test --debug test_FailingTest
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./Base.t.sol";
+import "forge-std/Test.sol";
+import {CS2InDEXFactory} from "../src/Factory.sol";
+import {Vault} from "../src/Vault.sol";
+import {Pool} from "../src/Pool.sol";
+import {OrderTypes} from "../src/interfaces/OrderTypes.sol";
 
-contract MyNewTest is BaseTest {
+contract MyNewTest is Test, OrderTypes {
+    CS2InDEXFactory factory;
+    Vault vault;
+    Pool pool;
 
-    function setUp() public override {
-        super.setUp();
-        // Additional setup
+    address alice = address(0x1);
+
+    function setUp() public {
+        // Deploy via factory (same as Integration tests)
+        TestERC20 usdc = new TestERC20("USDC", "USDC", 6);
+        factory = new CS2InDEXFactory(address(usdc));
+        vault = Vault(factory.vault());
+        (address poolAddr,) = factory.createPool("Test", 100e6, 6);
+        pool = Pool(poolAddr);
+
+        usdc.mint(alice, 10000e6);
+        vm.prank(alice);
+        usdc.approve(address(vault), type(uint256).max);
+        vm.prank(alice);
+        vault.deposit(5000e6);
     }
 
     function test_MyFeature() public {
-        // Arrange
-        _depositToVault(alice, 1000e6);
-
-        // Act
+        // Arrange + Act
         vm.prank(alice);
-        vault.withdraw(500e6);
+        pool.newOrder(1000e6, PoolOrder({
+            isSell: false,
+            oType: orderType.Limit,
+            size: 1e6,
+            price: 99e6
+        }));
 
         // Assert
-        assertEq(vault.balanceOf(alice), 500e6);
+        assertEq(vault.balanceOf(alice), 4000e6);
     }
 }
 ```
