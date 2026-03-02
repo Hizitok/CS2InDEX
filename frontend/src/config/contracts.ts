@@ -1,14 +1,7 @@
-// Contract addresses - Update these after deployment
-// deploy.sh auto-updates FACTORY, VAULT, USDC, ROUTER, NFT, POOL after running
-export const CONTRACTS = {
-  VAULT:   '0xe0c45Ec696231DF891d4A4eA34Bd3F132b1CA5B2' as `0x${string}`,
-  FACTORY: '0xFeC51Ce8694f04AB585D1b00A67cCb8c2f9bb3e3' as `0x${string}`,
-  USDC:    '0xa260796BcDE227d2460A21dbCc3D116cafc9A3D6' as `0x${string}`,
-  ROUTER:  '0xE13056d8d0b00000468e8aff83bBaff9Bb50340a' as `0x${string}`,
-  NFT:     '0x4162e92431f212b845dEAC2Af96DD0206dc5Ba60' as `0x${string}`,
-  // Primary pool (CS2-Global-Index) — chain 1301 (unichain-sepolia)
-  POOL:    '0x8d7f83eD4849Ded78E727AA4b954c4a11f0830Df' as `0x${string}`,
-} as const;
+// Contract addresses — loaded from local file (not tracked by git).
+// To set up: cp frontend/src/config/addresses.local.ts.example frontend/src/config/addresses.local.ts
+// To auto-populate after deploy: bash scripts/sync-addresses.sh
+export { CONTRACTS } from './addresses.local';
 
 // Price decimals (aligned with USDC = 6)
 export const PX_DECIMALS = 6;
