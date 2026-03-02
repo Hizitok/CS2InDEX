@@ -293,12 +293,12 @@ contract LiquidationEngine is IzitOSTreeMinimum, Ownable, IEngine {
             price: bankruptPx
         });
 
-        // 4. Send to Pool — order enters normal matching
-        IPool(pool).forceLiquidate(oID, closeOrder);
-
-        // 5. Clean up engine state
+        // 4. Clean up engine state before external call (CEI pattern)
         delete triggerPx[oID];
         delete isShortPos[oID];
+
+        // 5. Send to Pool — order enters normal matching
+        IPool(pool).forceLiquidate(oID, closeOrder);
 
         emit PositionLiquidated(oID, msg.sender, markPrice, bankruptPx);
     }

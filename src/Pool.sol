@@ -574,7 +574,13 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
             } else {
                 insert(_bid_OB, OrderId.unwrap(takerId));
             }
-        } 
+            // Register partially-filled position: the already-filled portion (openSize > 0)
+            // has real price exposure and must be monitored for liquidation.
+            // Full registration (pendingSize == 0) is handled inside matchMaking.
+            if (engine != address(0) && takerPos.openSize > 0 && takerPos.pendingSize > 0) {
+                IEngine(engine).registerPosition(takerId);
+            }
+        }
     }
 
     // Generally, a match needs buy Px > sell Px
@@ -603,11 +609,11 @@ contract Pool is Ownable, Pausable, IPool, IzitOSTreeMinimum {
         bool fillMaker = (OBSize[makerID] <= OBSize[takerID]);
         fillSz = (fillMaker)? OBSize[makerID] : OBSize[takerID];
 
-        // real currency's amount need to be fixed with currency's decimal, 
+        // real currency's amount need to be fixed with currency's decimal,
         // so divide pxScale here
-        uint256 matchAmt = fillSz * fillPx / pxScale;
-        uint256 makerFee = matchAmt * MAKERFEE / FEEBASIS;
-        uint256 takerFee = matchAmt * TAKERFEE / FEEBASIS;
+        // uint256 matchAmt = fillSz * fillPx / pxScale;
+        uint256 makerFee = fillSz * fillPx * MAKERFEE / (pxScale * FEEBASIS);
+        uint256 takerFee = fillSz * fillPx * TAKERFEE / (pxScale * FEEBASIS);
 
         Position memory makerPos;
 

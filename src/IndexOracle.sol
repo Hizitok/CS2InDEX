@@ -249,14 +249,14 @@ contract IndexOracle is Ownable, IOracle {
             newFundingIdx = 0;
         }
 
-        // Update pool's funding index
-        IPool(pool).updateFundingIndex(newFundingIdx);
-
-        // Reset accumulators for next period; restore both timestamps so the next period
-        // starts cleanly without carrying a stale gap from the previous period.
+        // Reset accumulators before external call (CEI pattern); restore both timestamps
+        // so the next period starts cleanly without carrying a stale gap from the previous period.
         delete poolData[pool];
         poolData[pool].lastFundingTime = uint64(block.timestamp);
         poolData[pool].lastTradeTime   = uint64(block.timestamp);
+
+        // Update pool's funding index
+        IPool(pool).updateFundingIndex(newFundingIdx);
 
         emit FundingRateCalculated(pool, fundingRate, avgVTWAPRate, interestRate);
     }
