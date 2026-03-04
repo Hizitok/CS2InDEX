@@ -56,7 +56,10 @@ export default function PositionsPage() {
 
                 {/* Right Column: Positions List (Wider) */}
                 <div className="lg:col-span-8 order-1 lg:order-2">
-                    <PriceChart />
+                    <PriceChart
+                        poolAddress={selectedPool?.address ?? CONTRACTS.POOL}
+                        poolName={selectedPool?.name}
+                    />
                     <OrderbookDepth poolAddress={selectedPool?.address ?? CONTRACTS.POOL} />
                     <PositionsList />
                 </div>
