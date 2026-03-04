@@ -20,6 +20,30 @@ import {TestERC20}       from "../test/mocks/TestERC20.sol";
 
 contract CS2InDEXDeployer {
 
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║                    POOL CONFIGURATION                           ║
+    // ║  每行一个 Pool：PoolConfig(名称, 初始价格raw, 价格小数位)          ║
+    // ║  价格 raw = 实际价格 × 10^pxDecimals                            ║
+    // ║  例：$393.5 × 10^6 = 393_500_000                               ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+
+    struct PoolConfig {
+        string  name;
+        uint256 initialPrice; // raw price = actual price × 10^pxDecimals
+        uint256 pxDecimals;
+    }
+
+    // ── 在这里增删改 Pool ──────────────────────────────────────────────
+    PoolConfig[] internal POOLS;
+
+    function _initPools() internal {
+        POOLS.push(PoolConfig("Buff163 CS2 Global Index", 393_500_000, 6)); // $393.50
+        POOLS.push(PoolConfig("CS2-Knives-Index", 80_000_000, 6)); // $80.00
+        POOLS.push(PoolConfig("CS2-Rifles-Index", 30_000_000, 6)); // $30.00
+        POOLS.push(PoolConfig("CS2-Gloves-Index", 40_000_000, 6)); // $40.00
+    }
+    // ──────────────────────────────────────────────────────────────────
+
     // ── 部署结果（全部 public，Remix 可直接点击读取）──────────────────────────
 
     address public usdc;
@@ -29,26 +53,8 @@ contract CS2InDEXDeployer {
     address public nft;
     address public router;
 
-    // pools[i] / engines[i] 对应下方 POOL_NAMES[i]
-    address[4] public pools;
-    address[4] public engines;
-
-    string[4] public POOL_NAMES = [
-        "CS2-Global-Index",
-        "CS2-Knives-Index",
-        "CS2-Rifles-Index",
-        "CS2-Gloves-Index"
-    ];
-
-    // 测试网初始价格（$100/unit，6 位小数）
-    uint256[4] internal INITIAL_PRICES = [
-        uint256(100e6),
-        uint256(100e6),
-        uint256(100e6),
-        uint256(100e6)
-    ];
-
-    uint256 constant PX_DECIMALS = 6;
+    address[] public pools;
+    address[] public engines;
 
     // ── 事件：方便在 Remix Logs 里看部署进度 ────────────────────────────────
     event Deployed(string step, address addr);
@@ -62,6 +68,7 @@ contract CS2InDEXDeployer {
      *                    _usdc 非零时此参数忽略
      */
     constructor(address _usdc, uint256 _mintAmount) {
+        _initPools();
 
         // ── Step 1: USDC ─────────────────────────────────────────────────────
         if (_usdc == address(0)) {
@@ -85,16 +92,16 @@ contract CS2InDEXDeployer {
         emit Deployed("Oracle",  oracle);
         emit Deployed("NFT",     nft);
 
-        // ── Step 3: 创建 4 个 Pool ───────────────────────────────────────────
-        for (uint256 i = 0; i < 4; i++) {
+        // ── Step 3: 创建 Pool ────────────────────────────────────────────────
+        for (uint256 i = 0; i < POOLS.length; i++) {
             (address pool, address engine) = fac.createPool(
-                POOL_NAMES[i],
-                INITIAL_PRICES[i],
-                PX_DECIMALS
+                POOLS[i].name,
+                POOLS[i].initialPrice,
+                POOLS[i].pxDecimals
             );
-            pools[i]   = pool;
-            engines[i] = engine;
-            emit Deployed(POOL_NAMES[i], pool);
+            pools.push(pool);
+            engines.push(engine);
+            emit Deployed(POOLS[i].name, pool);
         }
 
         // ── Step 4: 部署 Router ──────────────────────────────────────────────
@@ -108,8 +115,8 @@ contract CS2InDEXDeployer {
         fac.setRouter(router);
 
         // ── Step 6: 更新初始 Oracle 价格 ────────────────────────────────────
-        for (uint256 i = 0; i < 4; i++) {
-            fac.updatePrice(pools[i], INITIAL_PRICES[i]);
+        for (uint256 i = 0; i < pools.length; i++) {
+            fac.updatePrice(pools[i], POOLS[i].initialPrice);
         }
     }
 
@@ -121,8 +128,8 @@ contract CS2InDEXDeployer {
         address _oracle,
         address _nft,
         address _router,
-        address[4] memory _pools,
-        address[4] memory _engines
+        address[] memory _pools,
+        address[] memory _engines
     ) {
         return (usdc, factory, vault, oracle, nft, router, pools, engines);
     }
@@ -135,11 +142,16 @@ contract CS2InDEXDeployer {
         uint256 lastPrice,
         uint256 oraclePrice_
     ) {
-        require(index < 4, "index out of range");
-        name        = POOL_NAMES[index];
-        pool        = pools[index];
-        engine      = engines[index];
-        lastPrice   = IPool(pool).getLastPrice();
+        require(index < pools.length, "index out of range");
+        name         = POOLS[index].name;
+        pool         = pools[index];
+        engine       = engines[index];
+        lastPrice    = IPool(pool).getLastPrice();
         oraclePrice_ = IPool(pool).oraclePrice();
+    }
+
+    // ── 便捷 View：Pool 总数 ──────────────────────────────────────────────────
+    function poolCount() external view returns (uint256) {
+        return pools.length;
     }
 }

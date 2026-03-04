@@ -14,10 +14,7 @@ import { POOL_ABI, INDEX_ORACLE_ABI, PX_DECIMALS } from '@/config/contracts';
 import { TrendingUp, Activity, AlertCircle, Clock } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
-
-// 市场配置
-// Index Configuration
-const INDEX_POOL = { name: 'CS2 Market Index', address: '0x...' as `0x${string}` };
+import { usePool } from '@/contexts/PoolContext';
 
 /**
  * 单个市场卡片组件
@@ -159,6 +156,7 @@ function MarketCard({ name, address }: { name: string; address: `0x${string}` })
  */
 export function MarketOverview() {
   const { t } = useLanguage();
+  const { pools, isLoading } = usePool();
 
   return (
     <div className="glass-card rounded-2xl p-6 h-full flex flex-col">
@@ -168,7 +166,21 @@ export function MarketOverview() {
       </h2>
 
       <div className="flex-1">
-        <MarketCard name={INDEX_POOL.name} address={INDEX_POOL.address} />
+        {isLoading ? (
+          <div className="flex items-center justify-center h-40 text-gray-500 text-sm">
+            Loading pools...
+          </div>
+        ) : pools.length === 0 ? (
+          <div className="flex items-center justify-center h-40 text-gray-500 text-sm">
+            No pools found. Check contract configuration.
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {pools.map((pool) => (
+              <MarketCard key={pool.address} name={pool.name} address={pool.address} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

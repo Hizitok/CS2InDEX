@@ -12,20 +12,11 @@ import { useState, useMemo, useEffect } from 'react';
 import { useAccount, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import toast from 'react-hot-toast';
-import { POOL_ABI, PX_DECIMALS, ORDER_TYPE, TAKER_FEE, CONTRACTS } from '@/config/contracts';
+import { POOL_ABI, PX_DECIMALS, ORDER_TYPE, TAKER_FEE } from '@/config/contracts';
 import { TrendingUp, TrendingDown, Info, Wallet, Calculator } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '@/contexts/LanguageContext';
-
-/**
- * 交易标的物接口定义
- * @interface TradeItem
- */
-// Index Configuration — pool address from contracts.ts (updated post-deployment)
-const INDEX_ASSET = {
-  name: 'CS2 Market Index',
-  pool: CONTRACTS.POOL,
-};
+import { usePool } from '@/contexts/PoolContext';
 
 const MAX_LEVERAGE = 10; // 最大杠杆倍数
 
@@ -36,9 +27,10 @@ const MAX_LEVERAGE = 10; // 最大杠杆倍数
 export function TradingInterface() {
   const { address } = useAccount();
   const { t } = useLanguage();
+  const { selectedPool } = usePool();
 
   // 组件状态
-  const selectedItem = INDEX_ASSET;
+  const selectedItem = selectedPool;
   const [isLong, setIsLong] = useState<boolean>(true);
   const [size, setSize] = useState<string>('1'); // 数量 (Default 1)
   const [price, setPrice] = useState<string>('100'); // 价格 (Limit Order) - Default 100 for better demo
@@ -160,8 +152,13 @@ export function TradingInterface() {
 
       console.log('Submitting Order:', { margin: marginAmount, pOrder });
 
+      if (!selectedItem) {
+        toast.error('No pool selected');
+        return;
+      }
+
       writeContract({
-        address: selectedItem.pool as `0x${string}`,
+        address: selectedItem.address,
         abi: POOL_ABI,
         functionName: 'newOrder',
         args: [marginAmount, pOrder],
@@ -180,7 +177,7 @@ export function TradingInterface() {
       <div className="flex justify-between items-center mb-6">
         <h2 className="text-xl font-bold text-white flex items-center gap-2">
           <Calculator className="text-accent-cyan" size={24} />
-          {isLong ? t.trading.long : t.trading.short} {INDEX_ASSET.name}
+          {isLong ? t.trading.long : t.trading.short} {selectedItem?.name ?? '...'}
         </h2>
 
         {/* Leverage Display */}
@@ -351,7 +348,7 @@ export function TradingInterface() {
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.98 }}
           type="submit"
-          disabled={isConfirming || derivedInfo.isRisky}
+          disabled={isConfirming || derivedInfo.isRisky || !selectedItem}
           className={`w-full py-4 rounded-xl font-bold text-lg transition-all ${isConfirming ? 'opacity-50 cursor-wait' : ''
             } ${isLong
               ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_20px_rgba(34,197,94,0.4)]'

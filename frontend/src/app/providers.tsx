@@ -7,6 +7,7 @@ import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { config } from '@/config/wagmi';
 import { useState } from 'react';
 import { LanguageProvider } from '@/contexts/LanguageContext';
+import { PoolProvider } from '@/contexts/PoolContext';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -16,7 +17,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider theme={darkTheme()}>
           <LanguageProvider>
-            {children}
+            <PoolProvider>
+              {children}
+            </PoolProvider>
           </LanguageProvider>
         </RainbowKitProvider>
       </QueryClientProvider>

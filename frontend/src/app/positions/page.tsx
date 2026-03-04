@@ -8,9 +8,11 @@ import { PriceChart } from '@/components/market/PriceChart';
 import { OrderbookDepth } from '@/components/market/OrderbookDepth';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { CONTRACTS } from '@/config/contracts';
+import { usePool } from '@/contexts/PoolContext';
 
 export default function PositionsPage() {
     const { t } = useLanguage();
+    const { selectedPool } = usePool();
     const [activeTab, setActiveTab] = React.useState<'trade' | 'vault'>('trade');
 
     return (
@@ -55,7 +57,7 @@ export default function PositionsPage() {
                 {/* Right Column: Positions List (Wider) */}
                 <div className="lg:col-span-8 order-1 lg:order-2">
                     <PriceChart />
-                    <OrderbookDepth poolAddress={CONTRACTS.POOL} />
+                    <OrderbookDepth poolAddress={selectedPool?.address ?? CONTRACTS.POOL} />
                     <PositionsList />
                 </div>
             </div>

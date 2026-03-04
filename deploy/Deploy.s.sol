@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Script.sol";
+import "forge-std/StdJson.sol";
 import "forge-std/console.sol";
 
 import {CS2InDEXFactory} from "../src/Factory.sol";
@@ -25,24 +26,39 @@ import {TestERC20}       from "../test/mocks/TestERC20.sol";
  *   DEPLOYER_MINT     测试网给部署者 mint 的 USDC 数量（默认 1,000,000 USDC）
  */
 contract Deploy is Script {
+    using stdJson for string;
 
-    // ── 各 Pool 配置 ──────────────────────────────────────────────────────────
-    // pxDecimals = 6：价格单位和 USDC 一致，price = X 表示 X/1e6 个 USDC
-    // initialPrice = 100e6 表示指数初始价格 $100（测试网占位，上线后由预言机更新）
+    // ╔══════════════════════════════════════════════════════════════════╗
+    // ║                    POOL CONFIGURATION                           ║
+    // ║  编辑 deploy/pools.config.json 来增删改 Pool，无需改动 Solidity  ║
+    // ║  格式：[{ "initialPrice": 393500000, "name": "...", "pxDecimals": 6 }]║
+    // ║  价格 raw = 实际价格 × 10^pxDecimals  例：$393.5 × 10^6         ║
+    // ╚══════════════════════════════════════════════════════════════════╝
+
+    // For stdJson ABI decoding: fields must be in alphabetical order of JSON keys
+    struct PoolConfigJson {
+        uint256 initialPrice; // 'i' < 'n' < 'p'  ← alphabetical order required
+        string  name;
+        uint256 pxDecimals;
+    }
 
     struct PoolConfig {
         string  name;
-        uint256 initialPrice; // 单位：raw，需除以 10^pxDecimals 得到 USDC 价格
+        uint256 initialPrice; // raw price = actual price × 10^pxDecimals
         uint256 pxDecimals;
     }
 
     PoolConfig[] internal POOLS;
 
     function setUp() public {
-        POOLS.push(PoolConfig("CS2-Global-Index",  100e6, 6));
-        POOLS.push(PoolConfig("CS2-Knives-Index",   80e6, 6));
-        POOLS.push(PoolConfig("CS2-Rifles-Index",   30e6, 6));
-        POOLS.push(PoolConfig("CS2-Gloves-Index",   40e6, 6));
+        // ── 从 deploy/pools.config.json 读取 Pool 配置 ────────────────
+        string memory json = vm.readFile("deploy/pools.config.json");
+        bytes memory raw = vm.parseJson(json, "$");
+        PoolConfigJson[] memory decoded = abi.decode(raw, (PoolConfigJson[]));
+        for (uint256 i = 0; i < decoded.length; i++) {
+            POOLS.push(PoolConfig(decoded[i].name, decoded[i].initialPrice, decoded[i].pxDecimals));
+        }
+        // ──────────────────────────────────────────────────────────────
     }
 
     // ── 部署结果（供脚本内引用）──────────────────────────────────────────────

@@ -95,6 +95,13 @@ if [[ "$ETH_BALANCE" == "0" ]]; then
   warn "ETH 余额为 0，部署可能失败"
 fi
 
+# ── 同步 Pool 配置到 Deployer.sol ────────────────────────────────────────────
+SYNC_POOLS="$ROOT_DIR/scripts/sync-pools.sh"
+if [[ -f "$SYNC_POOLS" ]]; then
+  info "同步 Pool 配置（pools.config.json → Deployer.sol）..."
+  bash "$SYNC_POOLS" || warn "Pool 配置同步失败（不影响 Deploy.s.sol 部署，仅 Remix 版 Deployer.sol 未更新）"
+fi
+
 # ── 编译检查 ──────────────────────────────────────────────────────────────────
 info "编译合约..."
 forge build --quiet || error "编译失败，请先修复错误"
