@@ -4,9 +4,11 @@ out/
 # shell scripts (test/temp only; deployment scripts tracked via negation below)
 *.sh
 !deploy/deploy.sh
+!scripts/*.sh
 
 # Compilation docs
 *config.json
+!deploy/pools.config.json
 artifacts/
 
 */.deps

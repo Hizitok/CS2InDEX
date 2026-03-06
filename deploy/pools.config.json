@@ -1,0 +1,6 @@
+[
+  { "initialPrice": 393500000, "name": "Buff163 CS2 Global Index", "pxDecimals": 6 },
+  { "initialPrice":  80000000, "name": "CS2-Knives-Index",         "pxDecimals": 6 },
+  { "initialPrice":  30000000, "name": "CS2-Rifles-Index",         "pxDecimals": 6 },
+  { "initialPrice":  40000000, "name": "CS2-Gloves-Index",         "pxDecimals": 6 }
+]
